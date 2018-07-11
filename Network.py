@@ -4,6 +4,10 @@ Author: Jesse Hamer
 
 This is a collection of classes meant for handling caffe layer objects for
 the purposes of extracting network architecture information.
+
+The classes are designed specifically to parse Caffe networks used to analyze
+data from the MINERvA and NOvA experiments. They are not intended as general
+Caffe network containers.
 """
 
 import caffe_pb2
