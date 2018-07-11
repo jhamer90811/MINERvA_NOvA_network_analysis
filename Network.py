@@ -39,7 +39,7 @@ class Network:
                               'source_data','label_planecode','data',
                               'Slice NodeX1', 'Slice NodeX2', 'bottleneck',
                               'discard_features', 'keep_features','dc_labels']
-        nova_dummy_list = ['label','ipFinal']
+        nova_dummy_list = ['label']
         
         tmp_net = caffe_pb2.NetParameter()
         with open(caffeNet) as f:
@@ -50,19 +50,38 @@ class Network:
             #Need special handler for inception concatenators in NOVA networks
             if layer.type == 'Concat' and 'inception' in layer.name:
                 layer_name = layer.top[0]
+            elif layer.name == 'finalip':
+                layer_name = layer.top[0]
             else:
                 layer_name = layer.name
             self.layers[layer_name] = Layer(caffeLayer = layer)
+            if layer.name == 'finalip':
+                self.layers[layer_name].name = layer_name
             #Build dummy layers, if necessary:
             if layer.top:
                 for top in layer.top:
-                    if ((top in minerva_dummy_list) or (top in nova_dummy_list)) \
-                    and (not top in self.layers.keys()):
-                        dummyInfo = {'name':top,'type':'Placeholder', 'top':[], 
-                                     'bottom':layer.name}
-                        self.layers[top] = Layer(inputLayer = dummyInfo,
-                                   dummy = True)
-                        self.layers[layer.name].top.append(top)
+                    if ((top in minerva_dummy_list) or (top in nova_dummy_list)):
+                        if not top in self.layers.keys():
+                            if layer.include:
+                                if layer.include[0].phase == 0:
+                                    temp_phase = 'TRAIN'
+                                elif layer.include[0].phase == 1:
+                                    temp_phase = 'TEST'
+                            else:
+                                temp_phase = 'ALL'
+                            dummyInfo = {'name':top,'type':'Placeholder', 'top':[], 
+                                         'bottom':[layer_name], 'phase':temp_phase}
+                            self.layers[top] = Layer(inputLayer = dummyInfo,
+                                       dummy = True)
+                            self.layers[layer_name].top.append(top)
+                        else:
+                            if layer.include:
+                                if layer.include[0].phase != self.layers[top].phase:
+                                    self.layers[top].phase = 'ALL'
+                            else:
+                                self.layers[top].phase = 'ALL'
+                            self.layers[layer_name].top.append(top)
+                            self.layers[top].bottom.append(layer_name)
             #Build input layers, if necessary.
             if layer.top:
                 for top in layer.top:
@@ -71,44 +90,44 @@ class Network:
                         self.layers[inputInfo['name']] = Layer(inputLayer = inputInfo)
             #Update the tops of other layers.
             for bottom in layer.bottom:
-                self.layers[bottom].top.append(layer.name)
+                self.layers[bottom].top.append(layer_name)
             #Handle concatenation, if necessary:
             if layer.type == 'Concat':
                 self._concat_handler(layer_name,layer)
             #Update num_outputs of pooling or LRN layers.
             if layer.type in ['Pooling','LRN']:
-                self.layers[layer.name].layerParams['num_output'] = \
+                self.layers[layer_name].layerParams['num_output'] = \
                 self.layers[layer.bottom[0]].layerParams['num_output']
             #Handle Flatten and IP layers.    
             if layer.type == 'Flatten':
-                self.layers[layer.name].layerParams['input_grid'] = \
+                self.layers[layer_name].layerParams['input_grid'] = \
                 self.layers[layer.bottom[0]].layerParams['input_grid']
-                self.layers[layer.name].layerParams['num_output'] = \
-                np.prod(self.layers[layer.name].layerParams['input_grid'].shape)
+                self.layers[layer_name].layerParams['num_output'] = \
+                np.prod(self.layers[layer_name].layerParams['input_grid'].shape)
                 
             if layer.type =='InnerProduct':
-                self.layers[layer.name].layerParams['num_input'] = \
+                self.layers[layer_name].layerParams['num_input'] = \
                 self.layers[layer.bottom[0]].layerParams['num_output']
                 
             #Add outputs to special layers.
             
-            if layer.name in ['alias_to_bottleneck','slice_features',
+            if layer_name in ['alias_to_bottleneck','slice_features',
                               'bottleneck_alias','grl']:
-                self.layers[layer.name].layerParams['num_output'] = \
+                self.layers[layer_name].layerParams['num_output'] = \
                 self.layers[layer.bottom[0]].layerParams['num_output']
                 for top in layer.top:
                     if top in ['bottleneck', 'keep_features']:
                         self.layers[top].layerParams['num_output'] = \
-                        self.layers[layer.name].layerParams['num_output']
+                        self.layers[layer_name].layerParams['num_output']
             
             #Now check to see if we have layers whose grid attributes need
             #updating.
             if layer.type in ['Pooling', 'Convolution','LRN']:
                 #add input grid, and output grid
-                self.layers[layer.name].layerParams['input_grid'],\
-                self.layers[layer.name].layerParams['output_grid']=\
+                self.layers[layer_name].layerParams['input_grid'],\
+                self.layers[layer_name].layerParams['output_grid']=\
                     self.get_grids(self.layers[layer.bottom[0]],
-                                   self.layers[layer.name])
+                                   self.layers[layer_name])
             if layer.type in nonlinearity_list:
                 self.layers[layer.bottom[0]].layerParams['nonlinearity'] =\
                     layer.type
@@ -414,6 +433,14 @@ class Network:
         Auxiliary recursive funciton to get the list of all depth D layer 
         paths starting at inputLayer.
         
+        Inputs:
+            inputLayer: string name of Layer
+            
+            D: int depth
+            
+        Returns:
+            a list of lists of layer names
+        
         """
         
         tops = [t for t in self.layers[inputLayer].top if self.layers[t].type in 
@@ -554,7 +581,916 @@ class Network:
         return return_list
         
         
+    def get_max_paths(self, inputLayer, weightsOnly = False, convOnly = False,
+                      phases = ['ALL'], inception_unit = False, 
+                      include_pooling = False):
+        """
+        Returns the maximal length path starting at inputLayer.
+        
+        Parameters:
+            inputLayer: str; name of layer at which all desired paths begin
+            
+            weightsOnly: bool; whether or not to consider only layers which
+            have weights/biases. Effectively reduces to considering only
+            convolutional and inner product layers
+            
+            convOnly: bool; whether or not to consider only convolutional
+            layers. If True, the path search will stop when a "Flatten" layer
+            is met, as this signals the end of the convolutional segment of
+            the network.
+            
+            phases: list; sublist of ['ALL', 'TEST', 'TRAIN']; indicates the 
+            phases for which layers should be considered. Default is ['ALL'].
+            
+            inception_unit: bool; whether or not to treat an inception module
+            as a single 'layer' (thus contributing only 1 to depth). Default:
+            True
+            
+            include_pooling: bool; whether or not to add pooling layers to
+            paths when weightsOnly or convOnly is set to True. Default: False
+            
+        Returns:
+            a list of lists representing all paths from inputLayer to an
+            output. The first entry in every path is always inputLayer, and
+            the last entry is always a leaf node in the network.
+        """
+        ignore_list = ['ReLU', 'PReLU', 'ELU', 'Sigmoid', 'TanH', 
+                    'Power', 'Exp', 'Log', 'BNLL', 'Threshold', 
+                    'Bias', 'Scale', 'Dropout']
+        #For use when weightsOnly == True or convOnly == True
+        silence_list = ['Concat', 'Flatten', 'Pooling','Split', 'Slice',
+                        'Placeholder', 'LRN']
+        silence = False
+        if self.layers[inputLayer].type =='Pooling':
+            h = self.layers[inputLayer].layerParams['kernel_h']
+            w = self.layers[inputLayer].layerParams['kernel_w']
+            if h ==1 and w ==1:
+                silence = True
+                
+        if weightsOnly or convOnly:
+            if include_pooling:
+                silence_list.remove('Pooling')
+            if self.layers[inputLayer].type in silence_list:
+                silence = True
+                
+        if convOnly:
+            if self.layers[inputLayer].type == 'InnerProduct':
+                silence = True
+                
+        if not self.layers[inputLayer].phase in phases:
+            return []
+        
+        if silence:
+            inputList = []
+        else:
+            inputList = [inputLayer]
+        
+        tops = self.layers[inputLayer].top
+        
+        if not tops:
+            return [inputList]
+        else:
+            if inception_unit:
+                current = None
+                for top in tops:
+                    if 'inception' in top:
+                        current = top
+                        while self.layers[current].type != 'Concat':
+                            look_ahead = self.layers[current].top
+                            for t in look_ahead:
+                                if self.layers[t].type in ['Convolution',
+                                              'Pooling', 'Concat']:
+                                    current = t
+                                    break
+                        break
+                if current:
+                    tops = [current]
+            return_list = []
+            for t in tops:
+                if self.layers[t].type in ignore_list:
+                    continue
+                
+                if self.layers[t].phase in phases:
+                    return_list = return_list +\
+                    [inputList + path 
+                     for path in self.get_max_paths(t, weightsOnly,
+                                                   convOnly,phases,inception_unit)]
+                    
+            return return_list
+        
+    def path_between_layers(self, shallow_layer,deep_layer, weightsOnly = False, 
+                            convOnly = False,phases = ['ALL'], 
+                            inception_unit = False, include_pooling = False):
+        """
+        Returns all paths starting at shallow_layer and ending at deep_layer.
+        
+        Parameters:
+            shallow_layer: str; the layer at which the path begins
+            deep_layer: str; the layer at which the path ends
+        
+            weightsOnly: bool; whether or not to consider only layers which
+            have weights/biases. Effectively reduces to considering only
+            convolutional and inner product layers
+            
+            convOnly: bool; whether or not to consider only convolutional
+            layers. If True, the path search will stop when a "Flatten" layer
+            is met, as this signals the end of the convolutional segment of
+            the network.
+            
+            phases: list; sublist of ['ALL', 'TEST', 'TRAIN']; indicates the 
+            phases for which layers should be considered. Default is ['ALL'].
+            
+            inception_unit: bool; whether or not to treat an inception module
+            as a single 'layer' (thus contributing only 1 to depth). Default:
+            True
+            
+            include_pooling: bool; whether or not to add pooling layers to
+            paths when weightsOnly or convOnly is set to True. Default: False
+            
+        Returns:
+            a list of lists representing all paths from shallow_layer to 
+            deep_layer. The first entry in every path is always inputLayer, and
+            the last entry is always a leaf node in the network.
+        """
+        return_list = []
+        all_paths = self.get_max_paths(shallow_layer, weightsOnly, convOnly, 
+                                       phases, inception_unit, include_pooling)
+        
+        for path in all_paths:
+            if deep_layer in path:
+                index = path.index(deep_layer)
+                return_list.append(path[:index+1])
+        
+        return return_list
     
+    def get_depth(self, start_layer, key = 'MAX', weightsOnly = False, 
+                            convOnly = False,phases = ['ALL'], 
+                            inception_unit = False, include_pooling = False):
+        """
+        Uses key to return a summary statistic of network depth relative to start_layer.
+        Network depth is measured as the length of a path starting at start_layer
+        and ending at a network leaf-node (e.g. a loss layer).
+        
+        Parameters:
+            start_layer: str; the first layer in every considered path.
+            
+            key: str, one of 'MAX', 'MIN', or 'AVG': specifies whether the
+            maximum, minimum, or average depth should be returned. Default: MAX
+            
+            weightsOnly: bool; whether or not to consider only layers which
+            have weights/biases. Effectively reduces to considering only
+            convolutional and inner product layers
+            
+            convOnly: bool; whether or not to consider only convolutional
+            layers. If True, the path search will stop when a "Flatten" layer
+            is met, as this signals the end of the convolutional segment of
+            the network.
+            
+            phases: list; sublist of ['ALL', 'TEST', 'TRAIN']; indicates the 
+            phases for which layers should be considered. Default is ['ALL'].
+            
+            inception_unit: bool; whether or not to treat an inception module
+            as a single 'layer' (thus contributing only 1 to depth). Default:
+            True
+            
+            include_pooling: bool; whether or not to add pooling layers to
+            paths when weightsOnly or convOnly is set to True. Default: False
+            
+        Returns:
+            int/float summary_stat, str paths; paths is a list of all paths achieving
+            the 'MAX' or 'MIN', if key is set to either of these
+            
+        """
+        
+        all_paths = self.get_max_paths(start_layer, weightsOnly, convOnly, 
+                                       phases,inception_unit, include_pooling)
+        if key == 'MAX':
+            return_value = max([len(path) for path in all_paths])
+            return_list = [path for path in all_paths if len(path)==return_value]
+            return return_value,return_list
+            
+        elif key == 'MIN':
+            return_value = min([len(path) for path in all_paths])
+            return_list = [path for path in all_paths if len(path)==return_value]
+            return return_value,return_list
+            
+        elif key == 'AVG':
+            return_value = np.mean([len(path) for path in all_paths])
+            return return_value
+        else:
+            print('Invalid key: ', key)
+            return None
+    
+    def num_conv_layers(self, no_1x1 = False, phases = ['ALL'], inception_unit = False):
+        """
+        Returns the number of convolutional layers in the network. If no_1x1 is
+        set to True, will ignore convolutional layers with 1x1 kernels. Will
+        only count layers that participate in phases in 'phases'
+        
+        Parameters:
+            no_1x1: bool; Default: False
+            
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            inception_unit: bool; indicates whether or not convolutional layers
+            within inception modules should be counted. Default: False.
+            
+        Returns:
+            int
+        """
+        
+        counter = 0
+        
+        for key in self.layers.keys():
+            if self.layers[key].type == 'Convolution' and self.layers[key].phase in phases:
+                if no_1x1:
+                    h = self.layers[key].layerParams['kernel_h']
+                    w = self.layers[key].layerParams['kernel_w']
+                    if h==1 and w ==1:
+                        continue
+                if inception_unit and 'inception' in self.layers[key].name:
+                    continue
+                counter+=1
+                
+        return counter
+    
+    def num_inception_module(self, phases = ['ALL']):
+        """
+        Returns the number of inception module in the network which participate
+        in the phases of phases.
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+        Returns:
+            int
+        """
+        
+        counter = 0
+        
+        for key in self.layers.keys():
+            if self.layers[key].type == 'Concat' and\
+            self.layers[key].phase in phases and 'inception' in key:
+                counter +=1
+                
+        return counter
+    
+    def num_pooling_layers(self,phases = ['ALL'],inception_unit = False):
+        """
+        Returns the number of pooling layers in the network. Only considers
+        layers which participate in the phases of 'phases'.
+        
+        Parameters:
+            phases:list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            inception_unit: bool; indicates whether or not pooling layers
+            within inception modules should be counted. Default: False.
+            
+        Returns:
+            int
+        """
+        
+        counter = 0
+        
+        for key in self.layers.keys():
+            if self.layers[key].type == 'Pooling' and self.layers[key].phase in phases:
+                h = self.layers[key].layerParams['kernel_h']
+                w = self.layers[key].layerParams['kernel_w']
+                if h==1 and w ==1:
+                    continue
+                if inception_unit and 'inception' in key:
+                    continue
+                counter+=1
+                
+        return counter
+    
+    def num_IP_layers(self, phases = ['ALL']):
+        """
+        Returns the number of inner product (fully-connected) layers in the network.
+        Only considers layers which participate in the phases of 'phases'.
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+        Returns:
+            int
+        """
+        
+        counter = 0
+        
+        for key in self.layers.keys():
+            if self.layers[key].type == 'InnerProduct' and self.layers[key].phase in phases:
+                counter+=1
+                
+        return counter
+    
+    def num_skip_connections(self, phases = ['ALL']):
+        """
+        Returns the number of skip connections in phases of 'phases'.
+        ***NEEDS IMPLEMENTATION***
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+        Returns:
+            int
+        """
+        return None
+    def len_skip_connections(self, key = 'MAX', phases = ['ALL']):
+        """
+        Uses 'key' to return a summary statistic for the length of skip connections
+        in the network which participate in the phases of 'phases'.
+        ****NEEDS IMPLEMENTATION******
+        
+        Parameters:
+            
+            key: str, one of 'MAX', 'MIN', or 'AVG'; indicates which summary
+            statistic should be computed. Default: 'MAX'
+            
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+        Returns:
+            
+            int/float summary_stat, str layer_name; layer_name is the layer achieving
+            the 'MAX' or 'MIN', if key is set to either of these
+        """
+        
+        return None
+    
+    def num_IP_neurons(self, key = 'MAX', phases = ['ALL']):
+        """
+        Uses 'key' to return a summary statistic for the number of neurons
+        per inner product layer.
+        
+        Parameters:
+            key: str, one of 'MAX', 'MIN', or 'AVG'; indicates which summary
+            statistic should be computed. Default: 'MAX'
+            
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+        Returns:
+            int/float summary_stat, list of str layer_names; layer_names is the
+            list of layers achieving the 'MAX' or 'MIN', if key is set 
+            to either of these.
+        """
+        IP_layers = [layer for layer in self.layers.keys() if 
+                     self.layers[layer].type == 'InnerProduct' and
+                     self.layers[layer].phase in phases]
+        
+        if key == 'MAX':
+            return_value = max([self.layers[layer].layerParams['num_output'] for
+                                layer in IP_layers])
+            return_list = [layer for layer in IP_layers 
+                           if self.layers[layer].layerParams['num_output']==return_value]
+            return return_value,return_list
+            
+        elif key == 'MIN':
+            return_value = min([self.layers[layer].layerParams['num_output'] for
+                                layer in IP_layers])
+            return_list = [layer for layer in IP_layers 
+                           if self.layers[layer].layerParams['num_output']==return_value]
+            return return_value,return_list
+            
+        elif key == 'AVG':
+            return_value = np.mean([self.layers[layer].layerParams['num_output'] for
+                                layer in IP_layers])
+            return return_value
+        else:
+            print('Invalid key: ', key)
+            return None
+        
+    def num_IP_weights(self, key = 'MAX', phases = ['ALL']):
+        """
+        Uses 'key' to return a summary statistic for the number of weights in
+        a given IP layer. The number of weights is computed as num_input*num_output.
+        Only layers participating in the phases of 'phases' are considered.
+        
+        Parameters:
+            key: str, one of 'MAX', 'MIN', or 'AVG'; indicates which summary
+            statistic should be computed. Default: 'MAX'
+            
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+        Returns:
+            int/float summary_stat, list of str layer_names; layer_names is the
+            list of layers achieving the 'MAX' or 'MIN', if key is set 
+            to either of these.
+            
+        """
+        IP_layers = [layer for layer in self.layers.keys() if 
+                     self.layers[layer].type == 'InnerProduct' and
+                     self.layers[layer].phase in phases]
+        if key == 'MAX':
+            return_value = max([self.layers[layer].layerParams['num_output']*\
+                                self.layers[layer].layerParams['num_input'] for
+                                layer in IP_layers])
+            return_list = [layer for layer in IP_layers 
+                           if self.layers[layer].layerParams['num_output']*\
+                           self.layers[layer].layerParams['num_input']==return_value]
+            return return_value,return_list
+            
+        elif key == 'MIN':
+            return_value = min([self.layers[layer].layerParams['num_output']*\
+                                self.layers[layer].layerParams['num_input'] for
+                                layer in IP_layers])
+            return_list = [layer for layer in IP_layers 
+                           if self.layers[layer].layerParams['num_output']*\
+                           self.layers[layer].layerParams['num_input']==return_value]
+            return return_value,return_list
+            
+        elif key == 'AVG':
+            return_value = np.mean([self.layers[layer].layerParams['num_output']*\
+                                self.layers[layer].layerParams['num_input'] for
+                                layer in IP_layers])
+            return return_value
+        else:
+            print('Invalid key: ', key)
+            return None
+        
+    def num_splits(self, phases = ['ALL'], return_splits = False):
+        """
+        Returns the number of splits in the network. A 'split' is said to
+        occur if a layer has multiple tops. Only layers participating in phases
+        of 'phases' are considered. Nonlinearity layers are not counted towards
+        the count to determine if a layer splits or not.
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            return_splits: bool; determines whether a list of split layers
+            should be returned. Default: False
+            
+        Returns:
+            int, [list of str]
+        """
+        
+        ignore_types = ['ReLU', 'PReLU', 'ELU', 'Sigmoid', 'TanH', 
+                    'Power', 'Exp', 'Log', 'BNLL', 'Threshold', 
+                    'Bias', 'Scale', 'Dropout']
+        split_counter = 0
+        splits = []
+        
+        for layer in self.layers.keys():
+            if self.layers[layer].phase not in phases:
+                continue
+            counter = 0
+            for top in self.layers[layer].top:
+                if self.layers[top].type not in ignore_types:
+                    counter +=1
+                
+            if counter > 1:
+                split_counter+=1
+                if return_splits:
+                    splits.append(layer)
+                    
+        if return_splits:
+            return split_counter, splits
+        else:
+            return split_counter
+        
+    def split_widths(self, key = 'MAX', phases = ['ALL']):
+        """
+        Uses 'key' to return a summary statistic for the widths of splits
+        in the network. The width of a split is defined as the number of
+        layers to which it points (not including nonlinearity layers). Only
+        layers participating in the phases of 'phases' are considered.
+        
+        Parameters:
+            key: str, one of 'MAX', 'MIN', or 'AVG'; indicates which summary
+            statistic should be computed. Default: 'MAX'
+            
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+        Returns:
+            int/float summary_stat, list of str layer_names; layer_names is the
+            list of layers achieving the 'MAX' or 'MIN', if key is set 
+            to either of these.
+        """
+        ignore_types = ['ReLU', 'PReLU', 'ELU', 'Sigmoid', 'TanH', 
+                    'Power', 'Exp', 'Log', 'BNLL', 'Threshold', 
+                    'Bias', 'Scale', 'Dropout']
+        
+        splits = self.num_splits(phases = phases, return_splits = True)[1]
+        
+        widths = []
+        for split in splits:
+            tops = [top for top in self.layers[split].top if\
+                    top not in ignore_types]
+            widths.append((len(tops),split))
+        if key == 'MAX':
+            return_value = max([width[0] for width in widths])
+            return_list = [width[1] for width in widths if width[0]==return_value]
+            return return_value,return_list
+        elif key== 'MIN':
+            return_value = min([width[0] for width in widths])
+            return_list = [width[1] for width in widths if width[0]==return_value]
+            return return_value,return_list
+        elif key =='AVG':
+            return_value = np.mean([width[0] for width in widths])
+            return return_value
+        else:
+            print("Invalid key: ", key)
+            return None
+        
+    def num_concats(self, phases = ['ALL'], return_concats = False):
+        """
+        Returns the number of concatenations in the network. A concatenation
+        is defined as any layer which receives input from multiple layers; that
+        is, any layer with multiple entries in its 'bottom' list. Only layers 
+        participating in the phases of 'phases' are considered.
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            return_concats: bool; if True will return a list of all layers
+            where a concatenation occurs
+            
+        Returns:
+            int, list of str
+        """
+        
+        concat_counter = 0
+        concats = []
+        
+        for layer in self.layers.keys():
+            if len(self.layers[layer].bottom) > 1:
+                concat_counter +=1
+                if return_concats:
+                    concats.append(layer)
+        if return_concats:
+            return concat_counter,concats
+        else:
+            return concat_counter
+        
+    def concat_widths(self, key = 'MAX', phases = ['ALL']):
+        """
+        Uses 'key' to return a summary statistic for the widths of concats
+        in the network. The width of a concat is defined as the number of
+        layers which feed into it. Only layers participating in the phases 
+        of 'phases' are considered.
+        
+        Parameters:
+            key: str, one of 'MAX', 'MIN', or 'AVG'; indicates which summary
+            statistic should be computed. Default: 'MAX'
+            
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+        Returns:
+            int/float summary_stat, list of str layer_names; layer_names is the
+            list of layers achieving the 'MAX' or 'MIN', if key is set 
+            to either of these.
+        """
+        concats = self.num_concats(phases = phases, return_concats = True)[1]
+        
+        widths = []
+        for concat in concats:
+            bottoms = [bottom for bottom in self.layers[concat].bottom]
+            widths.append((len(bottoms),concat))
+        if key == 'MAX':
+            return_value = max([width[0] for width in widths])
+            return_list = [width[1] for width in widths if width[0]==return_value]
+            return return_value,return_list
+        elif key== 'MIN':
+            return_value = min([width[0] for width in widths])
+            return_list = [width[1] for width in widths if width[0]==return_value]
+            return return_value,return_list
+        elif key =='AVG':
+            return_value = np.mean([width[0] for width in widths])
+            return return_value
+        else:
+            print("Invalid key: ", key)
+            return None
+        
+    def conv_ker_area(self, key = 'MAX', phases = ['ALL'], include_inception = True):
+        """
+        Uses 'key' to return a summary statistic for the areas of convolutional 
+        kernels in the network. Only layers participating in the phases 
+        of 'phases' are considered.
+        
+        Parameters:
+            key: str, one of 'MAX', 'MIN', or 'AVG'; indicates which summary
+            statistic should be computed. Default: 'MAX'
+            
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            include_inception: If false, convolutional layers appearing in 
+            inception modules will not be considered.
+            
+        Returns:
+            int/float summary_stat, list of str layer_names; layer_names is the
+            list of layers achieving the 'MAX' or 'MIN', if key is set 
+            to either of these.
+        """
+        conv_layers = [layer for layer in self.layers.keys() if 
+                       self.layers[layer].type == 'Convolution']
+        if not include_inception:
+            conv_layers = [layer for layer in conv_layers if 
+                           'inception' not in layer]
+        areas = []
+        for layer in conv_layers:
+            h = self.layers[layer].layerParams['kernel_h']
+            w = self.layers[layer].layerParams['kernel_w']
+            area = h*w
+            areas.append((area, layer))
+        
+        if key == 'MAX':
+            return_value = max([area[0] for area in areas])
+            return_list = [area[1] for area in areas if area[0]==return_value]
+            return return_value,return_list
+        elif key == 'MIN':
+            return_value = min([area[0] for area in areas])
+            return_list = [area[1] for area in areas if area[0]==return_value]
+            return return_value,return_list
+        elif key == 'AVG':
+            return_value = np.mean([area[0] for area in areas])
+            return return_value
+        else:
+            print("Invalid key: ", key)
+            return None
+    def num_conv_features(self, key = 'MAX', phases = ['ALL'], include_inception = True):
+        """
+        Uses 'key' to return a summary statistic for the number of features in 
+        convolutional kernels in the network. Only layers participating in the 
+        phases of 'phases' are considered.
+        
+        Parameters:
+            key: str, one of 'MAX', 'MIN', or 'AVG'; indicates which summary
+            statistic should be computed. Default: 'MAX'
+            
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            include_inception: If false, convolutional layers appearing in 
+            inception modules will not be considered.
+            
+        Returns:
+            int/float summary_stat, list of str layer_names; layer_names is the
+            list of layers achieving the 'MAX' or 'MIN', if key is set 
+            to either of these.
+        """
+        conv_layers = [layer for layer in self.layers.keys() if 
+                       self.layers[layer].type == 'Convolution']
+        if not include_inception:
+            conv_layers = [layer for layer in conv_layers if 
+                           'inception' not in layer]
+        features = []
+        for layer in conv_layers:
+            feat = self.layers[layer].layerParams['num_output']
+            features.append((feat, layer))
+        
+        if key == 'MAX':
+            return_value = max([feat[0] for feat in features])
+            return_list = [feat[1] for feat in features if feat[0]==return_value]
+            return return_value,return_list
+        elif key == 'MIN':
+            return_value = min([feat[0] for feat in features])
+            return_list = [feat[1] for feat in features if feat[0]==return_value]
+            return return_value,return_list
+        elif key == 'AVG':
+            return_value = np.mean([feat[0] for feat in features])
+            return return_value
+        else:
+            print("Invalid key: ", key)
+            return None
+    
+    def prop_conv_into_pool(self, phases = ['ALL'], include_inception = True):
+        """
+        Returns the proportion of convolutional layers which are followed by 
+        a pooling layer. Only layers participating in phases of 'phases' are
+        considered. Also returns the list of layers which are followed by
+        pooling layers.
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            include_inception: If false, convolutional layers appearing in 
+            inception modules will not be considered.
+        
+        Returns:
+            float proportion, list of str pooled_conv_layers
+            
+        """
+        pool_layers = [layer for layer in self.layers.keys() if 
+                       self.layers[layer].type == 'Pooling']
+        follows_pooling = []
+        for layer in pool_layers:
+            for bottom in self.layers[layer].bottom:
+                if self.layers[bottom].type == 'Pooling':
+                    h = self.layers[bottom].layerParams['kernel_h']
+                    w = self.layers[bottom].layerParams['kernel_w']
+                    if h==1 and w ==1:
+                        continue
+                    else:
+                        follows_pooling.append(layer)
+                        break
+        pool_layers = [layer for layer in pool_layers if layer not in follows_pooling]
+                    
+        if not include_inception:
+            pool_layers = [layer for layer in pool_layers if 
+                           'inception' not in layer]
+        
+        conv_layers = [layer for layer in self.layers.keys() if 
+                       self.layers[layer].type == 'Convolution']
+        if not include_inception:
+            conv_layers = [layer for layer in conv_layers if 
+                           'inception' not in layer]
+            
+        num_conv_layers = len(conv_layers)
+        
+        if num_conv_layers ==0 or len(pool_layers)==0:
+            return 0,[]
+        
+        pooled_conv_layers = []
+        
+        for layer in pool_layers:
+            h = self.layers[layer].layerParams['kernel_h']
+            w = self.layers[layer].layerParams['kernel_w']
+            if h==1 and w ==1:
+                continue
+            for bottom in self.layers[layer].bottom:
+                if self.layers[bottom].type in ['LRN', 'Concat', 'Convolution']:
+                    pooled_conv_layers.append(bottom)
+                    break
+            
+        
+        proportion = len(pooled_conv_layers)/num_conv_layers
+        return proportion,pooled_conv_layers
+    
+    def prop_pool_into_pool(self, phases = ['ALL'], include_inception = True):
+        """
+        Returns the proportion of pooling layers which are followed by 
+        a pooling layer. Only layers participating in phases of 'phases' are
+        considered. Also returns the list of layers which are followed by
+        pooling layers.
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            include_inception: If false, convolutional layers appearing in 
+            inception modules will not be considered.
+        
+        Returns:
+            float proportion, list of str pooled_pool_layers
+            
+        """
+        pool_layers = [layer for layer in self.layers.keys() if 
+                       self.layers[layer].type == 'Pooling']
+        fake_pooling = []
+        for layer in pool_layers:
+            h = self.layers[layer].layerParams['kernel_h']
+            w = self.layers[layer].layerParams['kernel_w']
+            if h==1 and w ==1:
+                fake_pooling.append(layer)
+        pool_layers = [layer for layer in pool_layers if layer not in fake_pooling]
+                    
+        if not include_inception:
+            pool_layers = [layer for layer in pool_layers if 
+                           'inception' not in layer]
+            
+        num_pool_layers = len(pool_layers)
+        
+        if num_pool_layers ==0:
+            return 0,[]
+        
+        pooled_pool_layers = []
+        
+        for layer in pool_layers:
+            for bottom in self.layers[layer].bottom:
+                if bottom in pool_layers:
+                    pooled_pool_layers.append(bottom)
+                    break
+            
+        
+        proportion = len(pooled_pool_layers)/num_pool_layers
+        return proportion,pooled_pool_layers
+    
+    def prop_padded_conv(self, phases = ['ALL'], include_inception = True):
+        """
+        Returns the proportion of convolutional layers which are padded. 
+        Only layers participating in phases of 'phases' are considered. 
+        Also returns the list of convolutional layers which are padded.
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            include_inception: If false, convolutional layers appearing in 
+            inception modules will not be considered.
+        
+        Returns:
+            float proportion, list of str padded_conv_layers
+            
+        """
+        conv_layers = [layer for layer in self.layers.keys() if 
+                       self.layers[layer].type == 'Convolution']
+        if not include_inception:
+            conv_layers = [layer for layer in conv_layers if 
+                           'inception' not in layer]
+        padded_layers = []
+        
+        num_conv_layers = len(conv_layers)
+        
+        if conv_layers ==0:
+            return 0,[]
+        
+        for layer in conv_layers:
+            h = self.layers[layer].layerParams['pad_h']
+            w = self.layers[layer].layerParams['pad_w']
+            
+            if h == 0 and w ==0:
+                continue
+            else:
+                padded_layers.append(layer)
+                
+        proportion = len(padded_layers)/num_conv_layers
+        return proportion,padded_layers
+        
+    def prop_same_padded_conv(self, phases = ['ALL'], include_inception = True):
+        """
+        Returns the proportion of convolutional layers which are same-padded. 
+        Only layers participating in phases of 'phases' are considered. 
+        Also returns the list of convolutional layers which are same-padded.
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            include_inception: If false, convolutional layers appearing in 
+            inception modules will not be considered.
+        
+        Returns:
+            float proportion, list of str same_padded_conv_layers
+            
+        """
+        conv_layers = [layer for layer in self.layers.keys() if 
+                       self.layers[layer].type == 'Convolution']
+        if not include_inception:
+            conv_layers = [layer for layer in conv_layers if 
+                           'inception' not in layer]
+        same_padded_layers = []
+        
+        num_conv_layers = len(conv_layers)
+        
+        if num_conv_layers ==0:
+            return 0,[]
+        
+        for layer in conv_layers:
+            h = self.layers[layer].layerParams['pad_h']
+            w = self.layers[layer].layerParams['pad_w']
+            
+            ip_grid = self.layers[layer].layerParams['input_grid'][0]
+            r = ip_grid.shape[0]
+            c = ip_grid.shape[1]
+            ip_grid = ip_grid[h:r-h, w:c-w]
+            op_grid = self.layers[layer].layerParams['input_grid'][0]
+            
+            if h == 0 and w ==0:
+                continue
+            elif ip_grid.shape!=op_grid.shape:
+                continue
+            else:
+                same_padded_layers.append(layer)
+                
+        proportion = len(same_padded_layers)/num_conv_layers
+        return proportion,same_padded_layers
+    
+    def prop_1x1_conv(self, phases = ['ALL'], include_inception = True):
+        """
+        Returns the proportion of convolutional layers wwith 1x1 kernels. 
+        Only layers participating in phases of 'phases' are considered. 
+        Also returns the list of convolutional layers with 1x1 kernels.
+        
+        Parameters:
+            phases: list of 'ALL', 'TEST', or 'TRAIN'; Default: ['ALL']
+            
+            include_inception: If false, convolutional layers appearing in 
+            inception modules will not be considered.
+        
+        Returns:
+            float proportion, list of str same_padded_conv_layers
+            
+        """
+        conv_layers = [layer for layer in self.layers.keys() if 
+                       self.layers[layer].type == 'Convolution']
+        if not include_inception:
+            conv_layers = [layer for layer in conv_layers if 
+                           'inception' not in layer]
+        
+        num_conv_layers = len(conv_layers)
+        
+        if num_conv_layers ==0:
+            return 0,[]
+        
+        conv_1x1 = []
+            
+        for layer in conv_layers:
+            h = self.layers[layer].layerParams['kernel_h']
+            w = self.layers[layer].layerParams['kernel_w']
+            
+            if h==1 and w ==1:
+                conv_1x1.append(layer)
+                
+        proportion = len(conv_1x1)/num_conv_layers
+        return proportion, conv_1x1
+    
+        
     
 class UnionIter:
     """
@@ -651,7 +1587,7 @@ class UnionIter:
                             
             return (return_i, return_j)    
                     
-                    
+    
             
             
     
@@ -704,6 +1640,7 @@ class Layer:
             self.top = inputLayer['top']
             self.bottom = inputLayer['bottom']
             self.layerParams = {}
+            self.phase = inputLayer['phase']
         
     def _getLayerParams(self,caffeLayer = {}, inputLayer = {}):
         """
@@ -1010,6 +1947,14 @@ class Layer:
                              caffeLayer.convolution_param.kernel_h,
                              caffeLayer.convolution_param.kernel_w])
         
+    def print_layer(self):
+        print("Name: ",self.name)
+        print("Type: ",self.type)
+        print("Top: ", self.top)
+        print("Bottom: ", self.bottom)
+        print("Phase: ", self.phase)
+        for key in self.layerParams.keys():
+            print(key,': ', self.layerParams[key])
         
         
         
