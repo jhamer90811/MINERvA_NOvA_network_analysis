@@ -20,8 +20,8 @@ class Network:
     This class is the main container for caffe network objects. It will 
     consist of several layer objects and methods for those objects.
     
-    Currently, many methods are specific to networks designed for MINERvA
-    data, and will need to be modified so as to accomodate more generic
+    Currently, many methods are specific to networks designed for MINERvA 
+    and NOvA data, and will need to be modified so as to accomodate more generic
     network structures. Specifically, an all-purpose method to build input
     layers from a given caffe network specification is needed.
     """
