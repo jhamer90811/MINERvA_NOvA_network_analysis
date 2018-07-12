@@ -143,8 +143,9 @@ class Network:
         
         
     def _getInputInfo(self, caffeLayer, name, mode):
-        #NOTE: THIS IS SPECIFIC TO MINERVA DATA. CODE MUST BE MADE MORE GENERAL
-        #TO ACCOMODATE OTHER DATASETS.
+        """
+        Handler for MINERvA and NOvA input layers.
+        """
         if mode == 'minerva':
             input_c = 2
             input_h = 127
@@ -226,7 +227,11 @@ class Network:
         
         Parameters:
             input_layer: A Layer object.
+            
             output_layer: A layer object.
+            
+        Returns:
+            ndarray input_grid, ndarray output_grid
         """
         if input_layer.type == 'Input':
             ip_channels = input_layer.layerParams['channels']
@@ -277,7 +282,7 @@ class Network:
         """
         Takes an input image and feeds it into network's internal image
         containers. For MINERvA data, these are the layers data0_0, data0_1, 
-        and data0_2. NOVA implementation still needed.
+        and data0_2. For NOvA data, the layers are data0_0 and data0_1.
         
         Parameters:
             img: an image from either of the MINERvA or NOVA datasets
@@ -309,7 +314,7 @@ class Network:
             layer_name: a string giving the name of the layer to retrieve
             
         Returns:
-            a layer object
+            a Layer object
         """
         if not layer_name in self.layers.keys():
             print('Layer ' + layer_name + ' does not exist in ' + self.name)
@@ -358,7 +363,7 @@ class Network:
             
             points: a list of ordered pairs
         
-        returns: a _Union_iter iterator object
+        Returns: a _Union_iter iterator object
         """
         if points:
             union_input = [point + point for point in points]
