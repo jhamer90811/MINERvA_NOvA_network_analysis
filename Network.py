@@ -10,7 +10,8 @@ data from the MINERvA and NOvA experiments. They are not intended as general
 Caffe network containers.
 """
 
-import caffe_pb2
+import caffe_pb2, h5py, itertools
+import skimage as ski
 from google.protobuf import text_format
 import numpy as np
 
@@ -54,7 +55,10 @@ class Network:
         with open(caffeNet) as f:
             text_format.Merge(f.read(),tmp_net)
         self.name = tmp_net.name
+        self._img_counter = 0
         self.layers = {}
+        #Maintain special list of input layers for quick lookup
+        self.inputLayers = []
         for layer in tmp_net.layer:
             #Need special handler for inception concatenators in NOVA networks
             if layer.type == 'Concat' and 'inception' in layer.name:
@@ -97,6 +101,7 @@ class Network:
                     if 'data0' in top:
                         inputInfo = self._getInputInfo(layer, top, mode)
                         self.layers[inputInfo['name']] = Layer(inputLayer = inputInfo)
+                        self.inputLayers.append(top)
             #Update the tops of other layers.
             for bottom in layer.bottom:
                 self.layers[bottom].top.append(layer_name)
@@ -278,33 +283,155 @@ class Network:
         
         return input_grid, output_grid
     
-    def feed_image(self, img, mode = 'minerva'):
+    def feed_image(self, img_arr = None, mode = 'minerva', hdf5 = None,
+                   img_num = -1, rimg = False):
         """
         Takes an input image and feeds it into network's internal image
         containers. For MINERvA data, these are the layers data0_0, data0_1, 
-        and data0_2. For NOvA data, the layers are data0_0 and data0_1.
+        and data0_2. For NOvA data, the layers are data0_0 and data0_1. If
+        hdf5 is specified, will look for img within given hdf5 database.
         
         Parameters:
-            img: an image from either of the MINERvA or NOVA datasets
+            img_arr: 
+                an image from either of the MINERvA or NOVA datasets in
+                ndarray form
             
-            mode: either 'minerva' or 'nova'; default 'minerva'. Indicates
+            mode: 
+                either 'minerva' or 'nova'; default 'minerva'. Indicates
                 how images should be preprocessed
+                
+            hdf5: 
+                str; name of hdf5 file
+            
+            img_num: 
+                int; index into hdf5 image database indicating which image to get
+            
+            rimg: 
+                bool; if True and img_num not specified, will choose a random
+                image from the hdf5 image database
+                
+        Returns:
+            img_index:
+                if hdf5 mode was used, will return the index of the image
+                in the dataset which was fed to the network
         """
-        if mode == 'minerva':
-            #Preprocess image into desired shape, if necessary
-            #Assume image has shape (8, 127, 47)
-            img0_X1 = img[0:2]
-            img0_X2 = img[2:4]
-            img0 = np.concatenate((img0_X1,img0_X2),axis = 2)
-            img1 = img[4:6]
-            img2 = img[6:8]
-            self.layers['data0_0'].layerParams['output_grid'] = img0
-            self.layers['data0_1'].layerParams['output_grid'] = img1
-            self.layers['data0_2'].layerParams['output_grid'] = img2
-            return 1
-        else:
-            print('Cannot yet handle images from the dataset' + mode)
-            return None
+        if img_arr:
+            
+            if mode == 'minerva':
+                #Preprocess image into desired shape, if necessary
+                #Assume image has shape (8, 127, 47)
+                img0_X1 = img_arr[0:2]
+                img0_X2 = img_arr[2:4]
+                img0 = np.concatenate((img0_X1,img0_X2),axis = 2)
+                img1 = img_arr[4:6]
+                img2 = img_arr[6:8]
+                self.layers['data0_0'].layerParams['output_grid'] = img0
+                self.layers['data0_1'].layerParams['output_grid'] = img1
+                self.layers['data0_2'].layerParams['output_grid'] = img2
+            elif mode == 'nova':
+                img0 = img_arr[0]
+                img1 = img_arr[1]
+                self.layers['data0_0'].layerParams['output_grid'] = img0
+                self.layers['data0_1'].layerParams['output_grid'] = img1
+            else:
+                print('Cannot yet handle images from the dataset' + mode)
+                return None
+        elif hdf5:
+            if mode =='minerva':
+                data = h5py.File(hdf5)
+                imgs = data.get('/img_data')
+                u_view = imgs.get('hitimes-u')
+                v_view = imgs.get('hitimes-v')
+                x_view = imgs.get('hitimes-x')
+                
+                if img_num >=0:
+                    if img_num >= u_view.shape[0]:
+                        print('Given index is too large: ', img_num)
+                        return None
+                    index = img_num
+                elif rimg:
+                    index = np.random.randint(0, u_view.shape[0]-1)
+                else:
+                    print('No way to index images specified.')
+                    data.close()
+                    return None
+                self.layers['data0_0'].layerParams['output_grid'] = x_view[index]
+                self.layers['data0_1'].layerParams['output_grid'] = u_view[index]
+                self.layers['data0_2'].layerParams['output_grid'] = v_view[index]
+                data.close()
+                return index
+                
+                
+            elif mode =='nova':
+                data = h5py.File(hdf5)
+                imgs = data.get('/data')
+                
+                if img_num >=0:
+                    if img_num >= u_view.shape[0]:
+                        print('Given index is too large: ', img_num)
+                        return None
+                    index = img_num
+                elif rimg:
+                    index = np.random.randint(0, imgs.shape[0]-1)
+                else:
+                    print('No way to index images specified.')
+                    data.close()
+                    return None
+                img = imgs[index]
+                shape = img[0].shape
+                self.layers['data0_0'].layerParams['output_grid'] = img[0].reshape((1,) + shape)
+                self.layers['data0_1'].layerParams['output_grid'] = img[1].reshape((1,) + shape)
+                data.close()
+                return index
+                
+            else:
+                print('Cannot yet handle images from the dataset' + mode)
+                return None
+            
+    def reset_img_features(self):
+        """
+        Resets the features of each input layer.
+        """
+        for layer in self.inputLayers:
+            self.layers[layer].imgFeatures = {}
+            
+    def get_img_features(self, feature_list, avg_over_channels = False):
+        """
+        Populates the imgFeatures field of all Input layers with the features
+        listed in 'feature_list'.
+        
+        Parameters:
+            
+            feature_list:
+                list of str; one of the following: ['prop_nonzero_activations',
+                'prop_cropped_nonzero', 'horiz_spread', 'vert_spread']
+                
+            avg_over_channels:
+                bool; if True, will store the average of a feature over all
+                image channels; otherwise, stores separate entries in the 
+                feature dict for each channel
+                    
+        """
+        feature_dict = {
+                ### KEYS SHOULD REFERENCE FEATURE EXTRACTORS DEFINED BELOW ###
+                'prop_nonzero_activations': self._prop_nonzero_activations,
+                'prop_cropped_nonzero': self._prop_cropped_nonzero,
+                'horiz_spread': self._horiz_spread,
+                'vert_spread':self._vert_spread
+                }
+        for l in self.inputLayers:
+            for feat in feature_list:
+                channel_features = []
+                for c in range(self.layers[l].layerParams['channels']):
+                    channel_features.append((c, feature_dict[feat](self.layers[l].layerParams['output_grid'][c])))
+                if avg_over_channels:
+                    self.layers[l].imgFeatures[feat] = np.mean([f[1] for f in channel_features])
+                else:
+                    for cf in channel_features:
+                        self.layers[l].imgFeatures[feat+str(cf[0])] = cf[1]
+            
+                
+            
     
     def get_layer(self,layer_name):
         """
@@ -2546,6 +2673,161 @@ class Network:
             print('Invalid statistic key: ', key)
             return 0
         
+        
+#%%
+            
+########### IMAGE HANDLER FUNCTIONS ##################
+    
+    
+    
+    def _prop_nonzero_activations(self, img, tol = 0):
+        """
+        Returns the proportion of pixels in the image which are greater than tol
+        in absolute value.
+        
+        Parameters:
+            
+            img:
+                ndarray of shape (r, c)
+            tol:
+                float; Default = 0
+                
+        Returns:
+            float prop
+        """
+        
+        r,c = img.shape
+        
+        total_pixels = r*c
+        
+        indices = itertools.product(range(r),range(c))
+        
+        nonzero = [(i,j) for (i,j) in indices if abs(img[i,j])>tol]
+        
+        return len(nonzero)/total_pixels
+    
+    
+    def _horiz_spread(self, img, tol = 0):
+        """
+        Returns the column distance between right-most and left-most activations
+        which are larger than tol.
+        
+        Parameters:
+            img:
+                ndarray of shape (r, c) 
+            tol:
+                float; Default = 0
+                
+        Returns:
+            int horiz_spread
+        """
+        
+        r,c = img.shape
+        
+        indices = itertools.product(range(r),range(c))
+        
+        nonzero = [(i,j) for (i,j) in indices if abs(img[i,j])>tol]
+        
+        left_most = min([j for (i,j) in nonzero])
+        
+        right_most = max([j for (i,j) in nonzero])
+        
+        return right_most-left_most
+    
+    def _vert_spread(self,img,tol=0):
+        """
+        Returns the row distance between bottom-most and upper-most activations
+        which are larger than tol.
+        
+        Parameters:
+            img:
+                ndarray of shape (r, c) 
+            tol:
+                float; Default = 0
+                
+        Returns:
+            int vert_spread
+        """
+        
+        r,c = img.shape
+        
+        indices = itertools.product(range(r),range(c))
+        
+        nonzero = [(i,j) for (i,j) in indices if abs(img[i,j])>tol]
+        
+        top_most = min([i for (i,j) in nonzero])
+        
+        bottom_most = max([i for (i,j) in nonzero])
+        
+        return bottom_most-top_most
+    
+    def _crop_to_nonzero(self,img, tol=0, pad = 0):
+        """
+        Crops img to the smallest window containing all nonzero activations,
+        padded by pad.
+        
+        Parameters:
+            
+            img:
+                ndarray of shape (r, c) 
+            tol:
+                float; Default = 0
+            pad:
+                int; Default = 0
+            
+        Returns:
+            ndarray crop_img
+        """
+        
+        r,c = img.shape
+        
+        indices = itertools.product(range(r),range(c))
+        
+        nonzero = [(i,j) for (i,j) in indices if abs(img[i,j])>tol]
+        
+        top_most = max([0, min([i for (i,j) in nonzero])-pad])
+        
+        bottom_most = min([r,max([i for (i,j) in nonzero])+pad+1])
+        
+        left_most = max([0,min([j for (i,j) in nonzero])-pad])
+        
+        right_most = min([c,max([j for (i,j) in nonzero])+pad+1])
+        
+        return img[top_most:bottom_most,left_most:right_most]
+    
+    def _prop_cropped_nonzero(self, img, tol=0,pad = 0):
+        """
+        Returns the proportion of activations in the cropped image padded by pad
+        which are greater than tol in absolute value.
+        
+        Parameters:
+            
+            img:
+                ndarray of shape (r, c) 
+            tol:
+                float; Default = 0
+            pad:
+                int; Default = 0
+            
+        Returns:
+            float prop
+        """
+        
+        cropped_img = self._crop_to_nonzero(img, tol, pad)
+        
+        r,c = cropped_img.shape
+        
+        total_pixels = r*c
+        
+        indices = itertools.product(range(r),range(c))
+        
+        nonzero = [(i,j) for (i,j) in indices if abs(cropped_img[i,j])>tol]
+        
+        return len(nonzero)/total_pixels
+        
+    
+    
+    
     
 
             
@@ -2692,6 +2974,7 @@ class Layer:
                 self.type = inputLayer['type']
                 self.bottom = inputLayer['bottom']
                 self.top = inputLayer['top']
+                self.imgFeatures = {}
                 if inputLayer['include']:
                     if inputLayer['include'][0].phase == 0:
                         self.phase = 'TRAIN'
@@ -3025,8 +3308,18 @@ class Layer:
         print("Top: ", self.top)
         print("Bottom: ", self.bottom)
         print("Phase: ", self.phase)
-        for key in self.layerParams.keys():
-            print(key,': ', self.layerParams[key])
+        if self.layerParams:
+            for key in self.layerParams.keys():
+                print(key,': ', self.layerParams[key])
+        else:
+            print('No layer parameters loaded.')
+        if self.type =='Input':
+            if self.imgFeatures:
+                for key in self.imgFeatures.keys():
+                    print(key, ': ', self.imgFeatures[key])
+            else:
+                print('No image features loaded.')
+             
         
         
         
