@@ -9,12 +9,18 @@ data from the MINERvA and NOvA experiments. They are not intended as general
 Caffe network containers.
 """
 
+import itertools
+
+import gudhi as gd
+import h5py
 import numpy as np
+import simplicial as simp
 from google.protobuf import text_format
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
 
 from MINERvA_NOvA_network_analysis import caffe_pb2
-import h5py
-import itertools
 
 
 # %%
@@ -32,10 +38,12 @@ class Network:
     layers from a given Caffe network specification is needed.
     
     Parameters:
-        caffeNet: str; path to Caffe layer .prototxt file
+        caffeNet:
+            str; path to Caffe layer .prototxt file
         
-        mode: one of 'minerva' or 'nova'; specifies how certain aspects of 
-        network initialization are handled, e.g. input-dimensions
+        mode:
+            one of 'minerva' or 'nova'; specifies how certain aspects of
+            network initialization are handled, e.g. input-dimensions
     """
 
     # caffeNet is a path to a file containing a Caffe network protobuf
@@ -58,6 +66,7 @@ class Network:
         self.name = tmp_net.name
         self._img_counter = 0
         self.layers = {}
+        self.dataset = mode
         # Maintain special list of input layers for quick lookup
         self.inputLayers = []
         for layer in tmp_net.layer:
@@ -295,8 +304,8 @@ class Network:
 
         return input_grid, output_grid
 
-    def feed_image(self, img_arr=None, mode='minerva', hdf5=None,
-                   img_num=-1, rimg=False):
+    # noinspection PyTypeChecker
+    def feed_image(self, img_arr=np.array(None), mode='minerva', hdf5=None, img_num=-1, rimg=False, normalize=True):
         """
         Takes an input image and feeds it into network's internal image
         containers. For MINERvA data, these are the layers data0_0, data0_1, 
@@ -321,14 +330,16 @@ class Network:
             rimg: 
                 bool; if True and img_num not specified, will choose a random
                 image from the hdf5 image database
+
+            normalize:
+                bool; if True, will divide the image by the maximal absolute value of the array
                 
         Returns:
             img_index:
                 if hdf5 mode was used, will return the index of the image
                 in the dataset which was fed to the network
         """
-        if img_arr:
-
+        if img_arr.all() is not None:
             if mode == 'minerva':
                 # Preprocess image into desired shape, if necessary
                 # Assume image has shape (8, 127, 47)
@@ -337,14 +348,37 @@ class Network:
                 img0 = np.concatenate((img0_X1, img0_X2), axis=2)
                 img1 = img_arr[4:6]
                 img2 = img_arr[6:8]
+                if normalize:
+                    max0_0 = np.max(np.abs(img0[0]))
+                    max0_1 = np.max(np.abs(img0[1]))
+                    max1_0 = np.max(np.abs(img1[0]))
+                    max1_1 = np.max(np.abs(img1[1]))
+                    max2_0 = np.max(np.abs(img2[0]))
+                    max2_1 = np.max(np.abs(img2[1]))
+                    img0[0] = img0[0] / max0_0
+                    img0[1] = img0[1] / max0_1
+                    img1[0] = img1[0] / max1_0
+                    img1[1] = img1[1] / max1_1
+                    img2[0] = img2[0] / max2_0
+                    img2[1] = img2[1] / max2_1
                 self.layers['data0_0'].layerParams['output_grid'] = img0
+                self.layers['data0_0'].imgFeatures['id'] = 'custom_id'
                 self.layers['data0_1'].layerParams['output_grid'] = img1
+                self.layers['data0_1'].imgFeatures['id'] = 'custom_id'
                 self.layers['data0_2'].layerParams['output_grid'] = img2
+                self.layers['data0_2'].imgFeatures['id'] = 'custom_id'
             elif mode == 'nova':
-                img0 = img_arr[0]
-                img1 = img_arr[1]
+                img0 = img_arr[0].reshape((1,) + img_arr[0].shape)
+                img1 = img_arr[1].reshape((1,) + img_arr[0].shape)
+                if normalize:
+                    max0_0 = np.max(np.abs(img0[0]))
+                    max1_0 = np.max(np.abs(img1[0]))
+                    img0[0] = img0[0] / max0_0
+                    img1[0] = img1[0] / max1_0
                 self.layers['data0_0'].layerParams['output_grid'] = img0
+                self.layers['data0_0'].imgFeatures['id'] = 'custom_id'
                 self.layers['data0_1'].layerParams['output_grid'] = img1
+                self.layers['data0_1'].imgFeatures['id'] = 'custom_id'
             else:
                 print('Cannot yet handle images from the dataset' + mode)
                 return None
@@ -367,11 +401,30 @@ class Network:
                     print('No way to index images specified.')
                     data.close()
                     return None
-                self.layers['data0_0'].layerParams['output_grid'] = x_view[index]
-                self.layers['data0_1'].layerParams['output_grid'] = u_view[index]
-                self.layers['data0_2'].layerParams['output_grid'] = v_view[index]
+                x_img = x_view[index]
+                u_img = u_view[index]
+                v_img = v_view[index]
+
+                if normalize:
+                    max0_0 = np.max(np.abs(x_img[0]))
+                    max0_1 = np.max(np.abs(x_img[1]))
+                    max1_0 = np.max(np.abs(u_img[0]))
+                    max1_1 = np.max(np.abs(u_img[1]))
+                    max2_0 = np.max(np.abs(v_img[0]))
+                    max2_1 = np.max(np.abs(v_img[1]))
+                    x_img[0] = x_img[0] / max0_0
+                    x_img[1] = x_img[1] / max0_1
+                    u_img[0] = u_img[0] / max1_0
+                    u_img[1] = u_img[1] / max1_1
+                    v_img[0] = v_img[0] / max2_0
+                    v_img[1] = v_img[1] / max2_1
+                self.layers['data0_0'].layerParams['output_grid'] = x_img
+                self.layers['data0_0'].imgFeatures['id'] = index
+                self.layers['data0_1'].layerParams['output_grid'] = u_img
+                self.layers['data0_1'].imgFeatures['id'] = index
+                self.layers['data0_2'].layerParams['output_grid'] = v_img
+                self.layers['data0_2'].imgFeatures['id'] = index
                 data.close()
-                return index
             elif mode == 'nova':
                 data = h5py.File(hdf5)
                 imgs = data.get('/data')
@@ -388,15 +441,24 @@ class Network:
                     data.close()
                     return None
                 img = imgs[index]
+                if normalize:
+                    max0 = np.max(np.abs(img[0]))
+                    max1 = np.max(np.abs(img[1]))
+                    img[0] = img[0] / max0
+                    img[1] = img[1] / max1
                 shape = img[0].shape
                 self.layers['data0_0'].layerParams['output_grid'] = img[0].reshape((1,) + shape)
+                self.layers['data0_0'].imgFeatures['id'] = index
                 self.layers['data0_1'].layerParams['output_grid'] = img[1].reshape((1,) + shape)
+                self.layers['data0_1'].imgFeatures['id'] = index
                 data.close()
-                return index
 
             else:
                 print('Cannot yet handle images from the dataset' + mode)
                 return None
+        else:
+            print('Invalid input type.')
+            return None
 
     def reset_img_features(self):
         """
@@ -3001,6 +3063,732 @@ class Network:
         nonzero = [(i, j) for (i, j) in indices if abs(cropped_img[i, j]) > tol]
 
         return len(nonzero) / total_pixels
+
+    def get_img_distance(self, inputLayer, combine_channels=True, df='L2'):
+        """
+        Constructs distance matrix for use in building Rips complex from the image stored in inputLayer. The distance
+        function is computed as D((i1,j1,a1),(i2,j2,a2)) = (1/(a1^2 + a2^2))*d((i1,j1),(i2,j2)),
+        where d is the Euclidean distance in the plane.
+
+
+        :param inputLayer: str; name of inputLayer
+        :param combine_channels: bool; If True, distances will be computed using averaged channel activations, otherwise
+            separate distance matrices will be returned, one for each channel
+        :param df: the distance function used in computing pixel distances. Choose from one of the following:
+
+            1) 'L1': the L1 norm in R^2
+            2) 'L2': the L2 norm in R^2
+            3) 'L22': the L2 norm in R^2, squared
+            4) 'diffL2': the L2 norm in R^2, weighted by (difference of activations)
+            5) 'diffL22': the L2 norm in R^2, squared, weighted by (difference of activations)
+            6) 'L23d': the L2 norm in R^3
+            7) 'sumL2': the L2 norm in R^2, weighted by 1/(sum of abs(activation)s)
+            8) 'sumL22':the L2 norm in R^2, squared, weighted by 1/(sum of abs(activations)s)
+        :return: Populates the imgFeatures attribute of inputLayer with a lower-sub-triangular matrix
+            (list of lists of floats) for each input channel.
+        """
+        df_dict = {
+            'L1': self._L1,
+            'L2': self._L2,
+            'L22': self._L22,
+            'diffL2': self._diffL2,
+            'diffL22': self._diffL22,
+            'L23d': self._L23d,
+            'sumL2': self._sumL2,
+            'sumL22': self._sumL22
+        }
+
+        distances = []
+
+        points_list = self.get_img_points(inputLayer, combine_channels)
+
+        for points in points_list:
+            new_distances = []
+            for r in range(len(points)):
+                current_row = []
+                for c in range(r):
+                    p = np.array(points[r])
+                    q = np.array(points[c])
+                    D = df_dict[df](p, q)
+                    current_row.append(D)
+                new_distances.append(current_row)
+            distances.append(new_distances)
+
+        return distances
+
+    @staticmethod
+    def _L1(p, q):
+        """
+        The L1 norm on R^2
+
+        :param p: tuple of float (i,j,a)
+        :param q: tuple of float (i,j,a)
+        :return: L1(p,q)
+        """
+        return abs((p[:2] - q[:2])[0]) + abs((p[:2] - q[:2])[1])
+
+    @staticmethod
+    def _L2(p, q):
+        """
+        The L2 norm on R^2
+
+        :param p: tuple of float (i,j,a)
+        :param q: tuple of float (i,j,a)
+        :return: L2(p,q)
+        """
+        return np.linalg.norm(p[:2] - q[:2])
+
+    @staticmethod
+    def _L22(p, q):
+        """
+        The L2 norm on R^2, squared
+
+        :param p: tuple of float (i,j,a)
+        :param q: tuple of float (i,j,a)
+        :return: L2^2(p,q)
+        """
+        return np.linalg.norm((p[:2] - q[:2])) ** 2
+
+    @staticmethod
+    def _diffL2(p, q):
+        """
+        Returns the L2 norm weighted by abs(a_p - a_q)
+
+        :param p: tuple of float (i,j,a)
+        :param q: tuple of float (i,j,a)
+        :return: L2(p,q)*abs(a_p - a_q)
+        """
+        return np.abs(p[2] - q[2]) * np.linalg.norm((p[:2] - q[:2]))
+
+    @staticmethod
+    def _diffL22(p, q):
+        """
+        Returns the L2 norm, squared, weighted by abs(a_p-a_q)
+        :param p: tuple of float (i,j,a)
+        :param q: tuple of float (i,j,a)
+        :return: L2(p,q)^2 abs(a_p-a_q)
+        """
+        return np.abs(p[2] - q[2]) * np.linalg.norm((p[:2] - q[:2])) ** 2
+
+    @staticmethod
+    def _L23d(p, q):
+        """
+        Returns the L2 norm in R^3
+        :param p: tuple of float (i,j,a)
+        :param q: tuple of float (i,j,a)
+        :return: L2(p,q)
+        """
+        return np.linalg.norm(p - q)
+
+    @staticmethod
+    def _sumL2(p, q):
+        """
+        Returns the L2 norm, weighted by 1/(sum of activations)
+        :param p: tuple of float (i,j,a)
+        :param q: tuple of float (i,j,a)
+        :return: L2(p,q)/(a_p + a_q)
+        """
+        a_sum = p[2] + q[2]
+        if a_sum < 0.0001:
+            a_sum = 0.0001
+        return np.linalg.norm(p[:2] - q[:2]) / a_sum
+
+    @staticmethod
+    def _sumL22(p, q):
+        """
+        Returns the L2 norm, squared, weighted by 1/(sum of activations)
+        :param p: tuple of float (i,j,a)
+        :param q: tuple of float (i,j,a)
+        :return: L2(p,q)^2/(a_p + a_q)
+        """
+        a_sum = p[2] + q[2]
+        if a_sum < 0.0001:
+            a_sum = 0.0001
+        return np.linalg.norm(p[:2] - q[:2]) ** 2 / a_sum
+
+    def get_img_rips_cplx2d(self, inputLayer, combine_channels=True, threshold='10p', df='L2'):
+        """
+        Uses GUDHI in order to build Rips complex objects from the distance matrices stored in the layerParams of
+        inputLayer.
+
+        :param inputLayer: str; name of input layer
+
+        :param combine_channels: bool; If True, distances will be computed using averaged channel activations, otherwise
+            separate distance matrices will be returned, one for each channel
+            
+        :param threshold: str or int; if string, must be in form 'NUMp' where NUM is an integer between 0 and 100
+            denoting the percentile of distances which will serve as the cutoff; if int, represents the raw
+            max_edge_length. Default: '10p'
+
+        :param df: the distance function used in computing pixel distances. Choose from one of the following:
+
+            1) 'L1': the L1 norm in R^2
+            2) 'L2': the L2 norm in R^2
+            3) 'L22': the L2 norm in R^2, squared
+            4) 'diffL2': the L2 norm in R^2, weighted by (difference of activations)
+            5) 'diffL22': the L2 norm in R^2, squared, weighted by (difference of activations)
+            6) 'L23d': the L2 norm in R^3
+            7) 'sumL2': the L2 norm in R^2, weighted by 1/(sum of abs(activation)s)
+            8) 'sumL22':the L2 norm in R^2, squared, weighted by 1/(sum of abs(activations)s)
+
+        :return: GUDHI Rips complex object for each distance matrix
+        """
+
+        distances = self.get_img_distance(inputLayer, combine_channels, df)
+
+        melList = []
+        if type(threshold) == int:
+            for _ in distances:
+                melList.append(threshold)
+        elif type(threshold) == str:
+            p = int(threshold[:-1])
+            for d in distances:
+                dList = []
+                for r in d:
+                    for c in r:
+                        dList.append(c)
+                melList.append(np.percentile(dList, p))
+
+        complexes = []
+
+        for distance_matrix, mel in zip(distances, melList):
+            complexes.append(
+                gd.RipsComplex(distance_matrix=distance_matrix, max_edge_length=mel).create_simplex_tree(
+                    max_dimension=2))
+
+        return complexes
+
+    def set_img_rips_cplx2d(self, inputLayer, combine_channels=False, threshold='10p', df='L2'):
+        """
+        Uses GUDHI in order to build Rips complex objects from the distance matrices stored in the layerParams of
+        inputLayer.
+
+        :param inputLayer: str; name of input layer
+
+        :param combine_channels: bool; If True, distances will be computed using averaged channel activations, otherwise
+            separate distance matrices will be returned, one for each channel
+
+        :param threshold: str or int; if string, must be in form 'NUMp' where NUM is an integer between 0 and 100
+            denoting the percentile of distances which will serve as the cutoff; if int, represents the raw
+            max_edge_length. Default: '10p'
+
+        :param df: the distance function used in computing pixel distances. Choose from one of the following:
+
+            1) 'L1': the L1 norm in R^2
+            2) 'L2': the L2 norm in R^2
+            3) 'L22': the L2 norm in R^2, squared
+            4) 'diffL2': the L2 norm in R^2, weighted by (difference of activations)
+            5) 'diffL22': the L2 norm in R^2, squared, weighted by (difference of activations)
+            6) 'L23d': the L2 norm in R^3
+            7) 'sumL2': the L2 norm in R^2, weighted by 1/(sum of abs(activation)s)
+            8) 'sumL22':the L2 norm in R^2, squared, weighted by 1/(sum of abs(activations)s)
+
+        :return: GUDHI Rips complex object for each distance matrix
+        """
+        self.layers[inputLayer].imgFeatures['rips_complexes2d'] = self.get_img_rips_cplx2d(inputLayer, combine_channels,
+                                                                                           threshold, df)
+
+    def get_img_points(self, inputLayer, combine_channels=False):
+        """
+        Populates the "point_clouds" field of inputLayer's imgFeatures attribute with nonzero pixels
+
+        :param inputLayer: str; name of input layer
+        :param combine_channels: bool; whether activations should be averaged across channels
+        :return: no return
+        """
+        global current_points
+        img = self.layers[inputLayer].layerParams['output_grid']
+        chan, row, col = img.shape
+
+        points_list = []
+        zero_points = []
+
+        for c in range(chan):
+            current_points = []
+            indices = itertools.product(range(row), range(col))
+            for i, j in indices:
+                # If a pixel is 0 in energy channel, it is 0 in time.
+                if (i, j) in zero_points:
+                    continue
+                if img[c, i, j] == np.float(0) and c == 0:
+                    zero_points.append((i, j))
+                    continue
+                current_points.append((i, j, img[c, i, j]))
+            points_list.append(current_points)
+        if combine_channels:
+            new_points = []
+            for p in range(len(current_points)):
+                new_point = np.mean([points_list[c][p][2] for c in range(chan)])
+                new_points.append(points_list[0][p][:2] + (new_point,))
+            points_list = [new_points]
+
+        return points_list
+
+    def get_img_points2d(self, inputLayer):
+        """
+        Returns the 2d-indices of nonzero image activations. NOTE: the return-type is a list of depth 2.
+        :param inputLayer: str; name of inputLayer
+        :return: a depth-2 list of indices of nonzero image activations
+        """
+        return [p[:2] for p in self.get_img_points(inputLayer)[0]]
+
+    def get_img_alpha_cplx2d(self, inputLayer, alpha2='inf'):
+        """
+        Builds 2d alpha complex from the images in a given layer. Note: the 2d alpha complex does
+        not make use of activation values, so each channel produces the same alpha complex.
+
+        :param inputLayer: str; name of input layer
+        :param alpha2: float or 'inf'; determines maximal radius for alpha complex construction; if set to 'inf',
+            returns the Delaunay complex
+
+        :return: the 2d alpha complex for inputLayer
+        """
+
+        indices = self.get_img_points2d(inputLayer)
+
+        if alpha2 == 'inf':
+            return gd.AlphaComplex(points=indices).create_simplex_tree()
+        else:
+            return gd.AlphaComplex(points=indices).create_simplex_tree(max_alpha_square=alpha2)
+
+    def get_img_alpha_cplx3d(self, inputLayer, alpha2_list, combine_channels=False):
+        """
+        Uses pixel activations as z-coordinates to construct 3d alpha-complex.
+
+        :param inputLayer: str; name of input layer
+        :param alpha2_list: list of float of 'inf'; determines maximal radius for alpha complex construction; if set to
+            'inf', returns the Delaunay complex.
+        :param combine_channels: bool; whether or not to average activation values across all channels and return a
+            single complex
+        :return: a list of GUDHI alpha complexes, one for each channel
+        """
+        complexes = []
+
+        points_list = self.get_img_points(inputLayer, combine_channels)
+
+        for points, alpha2 in zip(points_list, alpha2_list):
+            if alpha2 == 'inf':
+                complexes.append(gd.AlphaComplex(points=points).create_simplex_tree())
+            else:
+                complexes.append(gd.AlphaComplex(points=points).create_simplex_tree(max_alpha_square=alpha2))
+
+        return complexes
+
+    def set_img_alpha_cplx2d(self, inputLayer, alpha2='inf'):
+        """
+        Sets the 'alpha_complex2d' field of inputLayers 'imgFeatures' attribute.
+
+        :param inputLayer: str; name of input layer
+        :param alpha2: float or 'inf'; determines maximal radius for alpha complex construction.
+        """
+
+        self.layers[inputLayer].imgFeatures['alpha_complex2d'] = self.get_img_alpha_cplx2d(inputLayer, alpha2)
+
+    def set_img_alpha_cplx3d(self, inputLayer, alpha2_list, combine_channels=False):
+        """
+        Sets the 'alpha_complexes3d' field of inputLayers 'imgFeatures' attribute.
+
+        :param inputLayer: str; name of input layer
+        :param alpha2_list: list of float of 'inf'; determines maximal radius for alpha complex construction; if set to
+            'inf', returns the Delaunay complex.
+        :param combine_channels: bool; whether or not to average activation values across all channels and return a
+            single complex
+        """
+        self.layers[inputLayer].imgFeatures['alpha_complexes3d'] = self.get_img_alpha_cplx3d(inputLayer, alpha2_list,
+                                                                                             combine_channels)
+
+    def get_img_witness_cplx2d(self, inputLayer, landmark_prop=0.25, alpha2=0):
+        """
+        Builds 2d (strong) witness complex from the images in a given layer. Will use 'get_n_farthest_points' to
+        determine a landmark set with landmark_prop*num_points points. Optional alpha2 parameter determines the
+        relaxation coefficient.
+
+        :param inputLayer: str; name of input layer
+        :param landmark_prop: float, between 0 and 1; the proportion of points to choose randomly for landmarks
+            Default=0.25.
+        :param alpha2: float; relaxation parameter. Default=0
+
+        :return: the 2d strong witness complex for inputLayer
+        """
+
+        witnesses = self.get_img_points2d(inputLayer)
+
+        landmarks = gd.pick_n_random_points(points=witnesses, nb_points=int(landmark_prop * len(witnesses)))
+
+        return gd.EuclideanStrongWitnessComplex(witnesses=witnesses,
+                                                landmarks=landmarks).create_simplex_tree(max_alpha_square=alpha2)
+
+    def set_img_witness_cplx2d(self, inputLayer, landmark_prop=0.25, alpha2=0):
+        """
+        Assigns 2d (strong) witness complex to the 'witness_complex2d' field of the imgFeatures attribute of inputLayer.
+
+        :param inputLayer: str; name of input layer
+        :param landmark_prop: float, between 0 and 1; the proportion of points to choose randomly for landmarks
+            Default=0.25.
+        :param alpha2: float; relaxation parameter. Default=0
+        """
+        self.layers[inputLayer].imgFeatures['witness_complex2d'] = self.get_img_witness_cplx2d(inputLayer,
+                                                                                               landmark_prop,
+                                                                                               alpha2)
+
+    def get_img_witness_cplx3d(self, inputLayer, landmark_prop=0.25, alpha2=0, combine_channels=False):
+        """
+        Returns a list of strong witness complexes for each channel in the input image.
+
+        :param inputLayer: str; name of input layer
+        :param landmark_prop: float, between 0 and 1; the proportion of points to choose randomly for landmarks
+            Default = 0.25
+        :param alpha2: float; relaxation parameter. Default = 0
+        :param combine_channels: bool; whether or not to average activation values over all image channels and
+            return a single image
+        :return: a list of 3d witness complexes, one for each img channel if combine_channels is False; the list has
+            length 1 if combine_channels is True
+        """
+        witnesses = self.get_img_points(inputLayer, combine_channels)
+
+        landmarks = [gd.pick_n_random_points(points=p, nb_points=int(landmark_prop * len(witnesses))) for p in
+                     witnesses]
+
+        complexes = []
+
+        for witness, landmark in zip(witnesses, landmarks):
+            complexes.append(gd.EuclideanStrongWitnessComplex(witness, landmark).create_simplex_tree(alpha2))
+
+        return complexes
+
+    def set_img_witness_cplx3d(self, inputLayer, landmark_prop=0.25, alpha2=0, combine_channels=False):
+        """
+        Sets the list of strong witness complexes for each channel in the input image to the 'witness_complexes3d'
+        field of the "imgFeatures" attribute of inputLayer.
+
+        :param inputLayer: str; name of input layer
+        :param landmark_prop: float, between 0 and 1; the proportion of points to choose randomly for landmarks
+            Default = 0.25
+        :param alpha2: float; relaxation parameter. Default = 0
+        :param combine_channels: bool; whether or not to average activation values over all image channels and
+            set a single image
+        """
+        self.layers[inputLayer].imgFeatures['witness_complexes3d'] = self.get_img_witness_cplx3d(inputLayer,
+                                                                                                 landmark_prop,
+                                                                                                 alpha2,
+                                                                                                 combine_channels)
+
+    def _get_gudhi_cplxes(self, inputLayer, cplx_type):
+        """
+        Retrieves GUDHI complexes of a given type.
+        :param inputLayer: str; name of input layer
+        :param cplx_type: one of 'alpha2d', 'witness2d', 'rips2d', 'alpha3d', or 'witness3d'
+        :return: the list of GUDHI complexes of the desired types
+        """
+
+        if cplx_type == 'alpha2d':
+            if 'alpha_complex2d' not in self.layers[inputLayer].imgFeatures.keys():
+                cplxes = [self.get_img_alpha_cplx2d(inputLayer, self.get_min_connected_alpha22d(inputLayer))]
+            else:
+                cplxes = [self.layers[inputLayer].imgFeatures['alpha_complex2d']]
+        elif cplx_type == 'rips2d':
+            if 'rips_complexes2d' not in self.layers[inputLayer].imgFeatures.keys():
+                cplxes = self.get_img_rips_cplx2d(inputLayer)
+            else:
+                cplxes = self.layers[inputLayer].imgFeatures['rips_complexes2d']
+        elif cplx_type == 'witness2d':
+            if 'witness_complex2d' not in self.layers[inputLayer].imgFeatures.keys():
+                cplxes = self.get_img_witness_cplx2d(inputLayer)
+            else:
+                cplxes = [self.layers[inputLayer].imgFeatures['witness_complex2d']]
+        elif cplx_type == 'alpha3d':
+            if 'alpha_complexes3d' not in self.layers[inputLayer].imgFeatures.keys():
+                cplxes = self.get_img_alpha_cplx3d(inputLayer, self.get_min_connected_alpha23d(inputLayer))
+            else:
+                cplxes = self.layers[inputLayer].imgFeatures['alpha_complexes3d']
+        elif cplx_type == 'witness3d':
+            if 'witness_complexes3d' not in self.layers[inputLayer].imgFeatures.keys():
+                cplxes = self.get_img_witness_cplx3d(inputLayer)
+            else:
+                cplxes = self.layers[inputLayer].imgFeatures['witness_complexes3d']
+        else:
+            print('Invalid complex type: {0}.'.format(cplx_type))
+            return None
+        return cplxes
+
+    def get_simplicial_complexes(self, inputLayer, cplx_type='alpha2d'):
+        """
+        Returns a list of SimplicialComplex objects built from the complexes of inputLayer of type cplx_type;
+        also returns a list of Embedding objects. The constructed complexes must be 2d.
+
+        :param inputLayer: str; name of input layer
+        :param cplx_type: str; one of 'alpha2d', 'witness2d', 'rips2d', 'alpha3d', or 'witness3d'
+        :return: a list of tuples (simplicial.SimplicialComplex,simplicial.Embedding)
+        """
+        if cplx_type in ['alpha2d', 'rips2d', 'witness2d']:
+            dim = '2d'
+        elif cplx_type in ['alpha3d', 'witness3d']:
+            dim = '3d'
+        else:
+            print('Invalid complex type: {0}.'.format(cplx_type))
+            return None
+        cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
+        scs = []
+        points_list = self.get_img_points(inputLayer)
+        for cplx, points in zip(cplxes, points_list):
+            sc = simp.SimplicialComplex()
+            faces = [f[0] for f in cplx.get_filtration()]
+            for f in faces:
+                if len(f) == 1:
+                    sc.addSimplexWithBasis(f, id=f[0], attr=points[f[0]][2])
+                else:
+                    sc.addSimplexWithBasis(f, id=tuple(f))
+            if dim == '2d':
+                sc_em = simp.Embedding(sc)
+                counter = 0
+                for p in points:
+                    sc_em.positionSimplex(counter, (p[1], 126 - p[0]))
+                    counter += 1
+                scs.append((sc, sc_em))
+            else:
+                sc_em = simp.Embedding(sc, 3)
+                counter = 0
+                for p in points:
+                    sc_em.positionSimplex(counter, (p[1], 126 - p[0], p[2]))
+                    counter += 1
+                scs.append((sc, sc_em))
+        return scs
+
+    def set_simplicial_complexes(self, inputLayer, cplx_type='alpha2d'):
+        """
+        Sets a list of SimplicialComplex objects built from the complexes of inputLayer of type cplx_type;
+        also returns a list of Embedding objects. The constructed complexes must be 2d.
+
+        :param inputLayer: str; name of input layer
+        :param cplx_type: str; one of 'alpha2d', 'witness2d', 'rips2d', 'alpha3d', or 'witness3d'
+        """
+        key = cplx_type + '_Simplicial'
+
+        self.layers[inputLayer].imgFeatures[key] = self.get_simplicial_complexes(inputLayer, cplx_type)
+
+    def get_min_connected_alpha22d(self, inputLayer):
+        """
+        Retrieves the minimal alpha^2 so that the 2d alpha complex of inputLayer's nonzero activations is connected.
+
+        :param inputLayer: str; name of input layer
+        :return: float min_connected_alpha^2
+        """
+        if 'alpha_complex2d' in self.layers[inputLayer].imgFeatures.keys():
+            ac2d = self.layers[inputLayer].imgFeatures['alpha_complex2d']
+        else:
+            ac2d = self.get_img_alpha_cplx2d(inputLayer)
+
+        pers = ac2d.persistence(2)
+        zero_pers = [p[1] for p in pers if p[0] == 0]
+        min_connected_alpha2 = max([p[1] for p in zero_pers if p[1] < float('Inf')])
+
+        return min_connected_alpha2
+
+    def get_min_connected_alpha23d(self, inputLayer):
+        """
+                Retrieves the minimal alpha^2 so that the 3d alpha complex of inputLayer's nonzero activations
+                is connected.
+
+                :param inputLayer: str; name of input layer
+                :return: float min_connected_alpha^2
+                """
+        if 'alpha_complex3d' in self.layers[inputLayer].imgFeatures.keys():
+            ac3d = self.layers[inputLayer].imgFeatures['alpha_complex3d']
+        else:
+            ac3d = self.get_img_alpha_cplx3d(inputLayer, ['inf' for _ in range(self.layers[inputLayer].layerParams['channels'])])
+
+        mc_alpha2_list = []
+        for c in ac3d:
+            pers = c.persistence(2)
+            zero_pers = [p[1] for p in pers if p[0] == 0]
+            min_connected_alpha2 = max([p[1] for p in zero_pers if p[1] < float('Inf')])
+            mc_alpha2_list.append(min_connected_alpha2)
+
+        return mc_alpha2_list
+
+    def get_betti_numbers(self, inputLayer, cplx_type='alpha2d'):
+        """
+        Returns the Betti numbers of a given complex.
+
+        :param inputLayer: str; name of input layer
+        :param cplx_type: one of 'alpha2d', 'witness2d', 'rips2d', 'alpha3d', or 'witness3d'
+        :return: a list of tuples of betti numbers (b0, b1, b2, ...) for each channel
+        """
+        cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
+
+        for cplx in cplxes:
+            trash = cplx.persistence(2)
+            del trash
+
+        return [cplx.betti_numbers() for cplx in cplxes]
+
+    def get_num_persistent_components(self, inputLayer, cplx_type='alpha2d', pers_scaler=0.5):
+        """
+        Returns a list of numbers of components of complexes which persist longer than pers_scaler*max_persistence.
+        Only works for alpha complexes.
+
+        :param inputLayer: str; name of input layer
+        :param cplx_type: one of 'alpha2d', 'alpha3d'
+        :param pers_scaler: float, between 0 and 1; the multiplier of max_persistence to determine
+        :return: int; the number of generators of persistent H_0 which survive longer than pers_scaler*max_persistence.
+        """
+        cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
+
+        nums = []
+
+        if cplx_type == 'alpha2d':
+            max_pers = [self.get_min_connected_alpha22d(inputLayer)]
+        elif cplx_type == 'alpha3d':
+            max_pers = self.get_min_connected_alpha23d(inputLayer)
+        else:
+            print('Invalid complex type: {}.'.format(cplx_type))
+            return None
+
+        for cplx, mp in cplxes, max_pers:
+            pers = cplx.persistence(2)
+            zero_pers = [p[1] for p in pers if p[0] == 0]
+            nums.append(len([p for p in zero_pers if p[1]-p[0] > pers_scaler*mp]))
+        return nums
+
+    def get_num_persistent_holes(self, inputLayer, cplx_type='alpha2d', pers_scaler=0.5):
+        """
+        Returns a list of numbers of holes of complexes which persist longer than pers_scaler*max_persistence.
+        Only works for alpha complexes.
+
+        :param inputLayer: str; name of input layer
+        :param cplx_type: one of 'alpha2d', 'alpha3d'
+        :param pers_scaler: float, between 0 and 1; the multiplier of max_persistence to determine
+        :return: int; the number of generators of persistent H_1 which survive longer than pers_scaler*max_persistence.
+        """
+        cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
+
+        nums = []
+
+        if cplx_type == 'alpha2d':
+            max_pers = [self.get_min_connected_alpha22d(inputLayer)]
+        elif cplx_type == 'alpha3d':
+            max_pers = self.get_min_connected_alpha23d(inputLayer)
+        else:
+            print('Invalid complex type: {}.'.format(cplx_type))
+            return None
+
+        for cplx, mp in zip(cplxes, max_pers):
+            pers = cplx.persistence(2)
+            one_pers = [p[1] for p in pers if p[0] == 1]
+            nums.append(len([p for p in one_pers if p[1] - p[0] > pers_scaler * mp]))
+        return nums
+
+    def get_num_persistent_voids(self, inputLayer, pers_scaler=0.5):
+        """
+        Returns a list of numbers of voids of complexes which persist longer than pers_scaler*max_persistence.
+        Only works for 3d alpha complexes.
+
+        :param inputLayer: str; name of input layer
+        :param pers_scaler: float, between 0 and 1; the multiplier of max_persistence to determine
+        :return: int; the number of generators of persistent H_2 which survive longer than pers_scaler*max_persistence.
+        """
+        cplxes = self._get_gudhi_cplxes(inputLayer, 'alpha3d')
+
+        nums = []
+
+        max_pers = self.get_min_connected_alpha23d(inputLayer)
+
+        for cplx, mp in zip(cplxes, max_pers):
+            pers = cplx.persistence(2)
+            two_pers = [p[1] for p in pers if p[0] == 2]
+            nums.append(len([p for p in two_pers if p[1] - p[0] > pers_scaler * mp]))
+        return nums
+
+    def get_bottleneck(self, inputLayer1, inputLayer2, cplx_type):
+        """
+        Computes the bottleneck distances between persistence diagrams of complexes of type cplx_type between
+        inputLayer1 and inputLayer2. A list of distances is returned, one for each channel.
+        :param inputLayer1: str; name of first input layer
+        :param inputLayer2: str; name of second input layer
+        :param cplx_type: one of 'alpha2d', 'witness2d', 'rips2d', 'alpha3d', or 'witness3d'
+        :return: list of floats; bottleneck distances for each channel
+        """
+        cplxes1 = self._get_gudhi_cplxes(inputLayer1, cplx_type)
+        cplxes2 = self._get_gudhi_cplxes(inputLayer2, cplx_type)
+
+        bottlenecks = []
+
+        for cplx1, cplx2 in zip(cplxes1, cplxes2):
+            diag1 = [p[1] for p in cplx1.persistence(2)]
+            diag2 = [p[1] for p in cplx2.persistence(2)]
+
+            bottlenecks.append(gd.bottleneck_distance(diag1, diag2))
+
+        return bottlenecks
+
+    def draw_alpha3d(self, inputLayer, channel=0):
+        """
+        Produces Axes3D objects for drawing the 3d alpha complex of input layer.
+
+        :param inputLayer: str; name of input layer
+        :param channel: the channel whose alpha complex should be drawn; Default = 0
+        """
+        if 'alpha3d_Simplicial' not in self.layers[inputLayer].imgFeatures.keys():
+            print('Please generate Simplicial complex first.')
+            return None
+
+        sc, sc_em = self.layers[inputLayer].imgFeatures['alpha3d_Simplicial'][channel]
+
+        points = self.get_img_points(inputLayer)[channel]
+
+        f = plt.figure(figsize=(8, 6))
+
+        xmin = min([p[1] for p in points])
+        xmax = max([p[1] for p in points])
+
+        ymin = min([126-p[0] for p in points])
+        ymax = max([126-p[0] for p in points])
+
+        zmin = min([p[2] for p in points])
+        zmax = max([p[2] for p in points])
+
+        ax = Axes3D(f)
+
+        ax.set_xlim3d(xmin, xmax)
+        ax.set_ylim3d(ymin, ymax)
+        ax.set_zlim3d(zmin, zmax)
+
+        vertices = [sc_em[s] for s in sc.simplicesOfOrder(0)]
+
+        xs, ys, zs = [v[0] for v in vertices], [v[1] for v in vertices], [v[2] for v in vertices]
+
+        ax.scatter(xs, ys, zs, c='b')
+
+        for s in sc.simplicesOfOrder(1):
+            x0, y0, z0 = sc_em[s[0]]
+            x1, y1, z1 = sc_em[s[1]]
+
+            edge = Line3DCollection([[(x0, y0, z0), (x1, y1, z1)]])
+            edge.set_color('k')
+            ax.add_collection3d(edge)
+
+        for s in sc.simplicesOfOrder(2):
+            x0, y0, z0 = sc_em[s[0]]
+            x1, y1, z1 = sc_em[s[1]]
+            x2, y2, z2 = sc_em[s[2]]
+
+            tri = Poly3DCollection([[(x0, y0, z0), (x1, y1, z1), (x2, y2, z2)]])
+            tri.set_alpha(0.5)
+            tri.set_edgecolor('k')
+            tri.set_facecolor('r')
+            ax.add_collection3d(tri)
+
+        for s in sc.simplicesOfOrder(3):
+            x0, y0, z0 = sc_em[s[0]]
+            x1, y1, z1 = sc_em[s[1]]
+            x2, y2, z2 = sc_em[s[2]]
+            x3, y3, z3 = sc_em[s[3]]
+
+            tetra = Poly3DCollection([[(x0, y0, z0), (x1, y1, z1), (x2, y2, z2), (x3, y3, z3)]])
+            tetra.set_alpha(0.5)
+            tetra.set_edgecolor('k')
+            tetra.set_facecolor('g')
+            ax.add_collection3d(tetra)
 
 
 # %%
