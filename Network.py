@@ -69,6 +69,7 @@ class Network:
         self.dataset = mode
         # Maintain special list of input layers for quick lookup
         self.inputLayers = []
+        trash_list = []
         for layer in tmp_net.layer:
             # Need special handler for inception concatenators in NOVA networks
             if layer.type == 'Concat' and 'inception' in layer.name:
@@ -77,7 +78,16 @@ class Network:
                 layer_name = layer.top[0]
             else:
                 layer_name = layer.name
+            if layer.type == 'Pooling':
+                if layer.pooling_param.kernel_size == 1 or (layer.pooling_param.kernel_h == 1 and layer.pooling_param.kernel_w == 1):
+                    trash_list.append((layer_name, layer.bottom))
+                    continue
             self.layers[layer_name] = Layer(caffeLayer=layer)
+            for b in layer.bottom:
+                if b in [t[0] for t in trash_list]:
+                    new_bottom = [nb for p, nb in trash_list if p == b][0]
+                    self.layers[layer_name].bottom = new_bottom
+                    trash_list.remove((b, new_bottom))
             if layer.name == 'finalip':
                 self.layers[layer_name].name = layer_name
             # Build dummy layers, if necessary:
@@ -114,7 +124,7 @@ class Network:
                         self.layers[inputInfo['name']] = Layer(inputLayer=inputInfo)
                         self.inputLayers.append(top)
             # Update the tops of other layers.
-            for bottom in layer.bottom:
+            for bottom in self.layers[layer_name].bottom:
                 self.layers[bottom].top.append(layer_name)
             # Handle concatenation, if necessary:
             if layer.type == 'Concat':
@@ -122,24 +132,24 @@ class Network:
             # Update num_outputs of pooling or LRN layers.
             if layer.type in ['Pooling', 'LRN']:
                 self.layers[layer_name].layerParams['num_output'] = \
-                    self.layers[layer.bottom[0]].layerParams['num_output']
+                    self.layers[self.layers[layer_name].bottom[0]].layerParams['num_output']
             # Handle Flatten and IP layers.
             if layer.type == 'Flatten':
                 self.layers[layer_name].layerParams['input_grid'] = \
-                    self.layers[layer.bottom[0]].layerParams['input_grid']
+                    self.layers[self.layers[layer_name].bottom[0]].layerParams['input_grid']
                 self.layers[layer_name].layerParams['num_output'] = \
                     np.prod(self.layers[layer_name].layerParams['input_grid'].shape)
 
             if layer.type == 'InnerProduct':
                 self.layers[layer_name].layerParams['num_input'] = \
-                    self.layers[layer.bottom[0]].layerParams['num_output']
+                    self.layers[self.layers[layer_name].bottom[0]].layerParams['num_output']
 
             # Add outputs to special layers.
 
             if layer_name in ['alias_to_bottleneck', 'slice_features',
                               'bottleneck_alias', 'grl']:
                 self.layers[layer_name].layerParams['num_output'] = \
-                    self.layers[layer.bottom[0]].layerParams['num_output']
+                    self.layers[self.layers[layer_name].bottom[0]].layerParams['num_output']
                 for top in layer.top:
                     if top in ['bottleneck', 'keep_features']:
                         self.layers[top].layerParams['num_output'] = \
@@ -150,10 +160,10 @@ class Network:
             if layer.type in ['Pooling', 'Convolution', 'LRN']:
                 # add input grid, and output grid
                 self.layers[layer_name].layerParams['input_grid'], self.layers[layer_name].layerParams['output_grid'] = \
-                    self.get_grids(self.layers[layer.bottom[0]],
+                    self.get_grids(self.layers[self.layers[layer_name].bottom[0]],
                                    self.layers[layer_name])
             if layer.type in nonlinearity_list:
-                self.layers[layer.bottom[0]].layerParams['nonlinearity'] = layer.type
+                self.layers[self.layers[layer_name].bottom[0]].layerParams['nonlinearity'] = layer.type
 
     @staticmethod
     def _getInputInfo(caffeLayer, name, mode):
@@ -464,13 +474,15 @@ class Network:
         """
         Resets the features of each input layer.
         """
-        for layer in self.inputLayers:
+        for layer in self.layers:
             self.layers[layer].imgFeatures = {}
 
-    def get_img_features(self, feature_list, avg_over_channels=False):
+    def get_simple_img_features(self, feature_list, avg_over_channels=False):
         """
         Populates the imgFeatures field of all Input layers with the features
         listed in 'feature_list'.
+        **DO NOT USE: NEED TO IMPLEMENT ABILITY TO PASS PARAMETERS TO ATTRIBUTE FUNCTIONS
+        CURRENTLY ONLY DEFAULT OPTIONS ARE USABLE**
         
         Parameters:
             
@@ -583,17 +595,16 @@ class Network:
         into which the activations of A flow. If D is specified, will
         return the flow of A into all child layers of inputLayer of depth <= D.
         
-        Parameters:
-            A: A list or tuple of ordered pairs denoting the activations whose
+        :param A: A list or tuple of ordered pairs denoting the activations whose
             flow is desired.
-            inputLayer: The layer whose output grid contains A.
-            layerPath: A list of layer names. The first element is taken to be
+        :param inputLayer: The layer whose output grid contains A.
+        :param layerPath: A list of layer names. The first element is taken to be
             inputLayer, and any consecutive layers should have a bottom->
             top relationship.
-            D: The depth relative to layer1 of layers for which we would like
+        :param D: The depth relative to layer1 of layers for which we would like
             to know the flow of A.
                 
-        Returns:
+        :return:
             If layerPath is nonempty and D = 0:
                 A list of tuples of the form (layer_name, ListFields),
                 where ListFields is a list of tuples (i1,j1,i2,j2), where 
@@ -619,10 +630,12 @@ class Network:
             for i in range(len(layerPath) - 1):
                 bottom_layer = self.layers[layerPath[i]]
                 top_layer = self.layers[layerPath[i + 1]]
+                op_shape = top_layer.layerParams['output_grid'][0].shape
 
                 flow = self._flow_once(activations, bottom_layer, top_layer)
-                return_list.append((top_layer.name, flow))
-                activations = [point for point in self.union_fields(flow)]
+                activations = [p for p in self.union_fields(flow) if
+                               0 <= p[0] < op_shape[0] and 0 <= p[1] < op_shape[1]]
+                return_list.append((top_layer.name, activations))
 
             return return_list
 
@@ -3332,6 +3345,14 @@ class Network:
         """
         return [p[:2] for p in self.get_img_points(inputLayer)[0]]
 
+    def set_img_points2d(self, inputLayer):
+        """
+        Returns the 2d-indices of nonzero image activations. NOTE: the return-type is a list of depth 2.
+        :param inputLayer: str; name of inputLayer
+        :return: None
+        """
+        self.layers[inputLayer].imgFeatures['points_2d'] = self.get_img_points2d(inputLayer)
+
     def get_img_alpha_cplx2d(self, inputLayer, alpha2='inf'):
         """
         Builds 2d alpha complex from the images in a given layer. Note: the 2d alpha complex does
@@ -3580,7 +3601,7 @@ class Network:
 
         pers = ac2d.persistence(2)
         zero_pers = [p[1] for p in pers if p[0] == 0]
-        min_connected_alpha2 = max([p[1] for p in zero_pers if p[1] < float('Inf')])
+        min_connected_alpha2 = max([p[1] for p in zero_pers if p[1] < float('Inf')])+0.25
 
         return min_connected_alpha2
 
@@ -3617,8 +3638,7 @@ class Network:
         cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
 
         for cplx in cplxes:
-            trash = cplx.persistence(2)
-            del trash
+            cplx.persistence(2)
 
         return [cplx.betti_numbers() for cplx in cplxes]
 
@@ -3720,6 +3740,29 @@ class Network:
             bottlenecks.append(gd.bottleneck_distance(diag1, diag2))
 
         return bottlenecks
+
+    def draw_alpha2d(self, inputLayer):
+        """
+        Produces Axes object for drawing the 2d alpha complex of input layer.
+
+        :param inputLayer: str; name of input layer
+        """
+
+        if 'alpha2d_Simplicial' not in self.layers[inputLayer].imgFeatures.keys():
+            print('Please generate Simplicial complex first.')
+            return None
+
+        sc, sc_em = self.layers[inputLayer].imgFeatures['alpha2d_Simplicial'][0]
+
+        points2d = self.get_img_points2d(inputLayer)
+
+        xmin = min([p[1] for p in points2d])
+        xmax = max([p[1] for p in points2d])
+
+        ymin = min([126 - p[0] for p in points2d])
+        ymax = max([126 - p[0] for p in points2d])
+
+        simp.draw_complex(sc, sc_em, xlims=[xmin-10, xmax+10], ylims=[ymin-10, ymax+10])
 
     def draw_alpha3d(self, inputLayer, channel=0):
         """
@@ -3927,6 +3970,7 @@ class Layer:
                 self.type = caffeLayer.type
                 self.bottom = caffeLayer.bottom
                 self.top = []
+                self.imgFeatures = {}
                 if caffeLayer.include:
                     if caffeLayer.include[0].phase == 0:
                         self.phase = 'TRAIN'
@@ -3958,6 +4002,7 @@ class Layer:
             self.top = inputLayer['top']
             self.bottom = inputLayer['bottom']
             self.layerParams = {}
+            self.imgFeatures = {}
             self.phase = inputLayer['phase']
 
     def _getLayerParams(self, caffeLayer=None, inputLayer=None):
