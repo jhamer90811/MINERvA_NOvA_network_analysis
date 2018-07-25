@@ -55,7 +55,13 @@ try:
     print('Loaded mpl_toolkits!')
 except:
     print('Failed to load mpl_toolkits.')
+try:
+    from MINERvA_NOvA_network_analysis import caffe_pb2
+    print('Loaded caffe_pb2!')
+except:
+    print('Failed to load caffe_pb2')
 
 print('The arguments you passed were: ')
 for arg in sys.argv[1:]:
     print(arg)
+
