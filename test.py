@@ -9,8 +9,10 @@ import sys
 
 print('Running {}...'.format(sys.argv[0]))
 
+print('System path is: {}'.format(sys.path))
+
 try:
-    from MINERvA_NOvA_network_analysis.Network import Network
+    from Network import Network
     print('Loaded Network!')
 except:
     print('Failed to load Network')
@@ -56,7 +58,7 @@ try:
 except:
     print('Failed to load mpl_toolkits.')
 try:
-    from MINERvA_NOvA_network_analysis import caffe_pb2
+    import caffe_pb2
     print('Loaded caffe_pb2!')
 except:
     print('Failed to load caffe_pb2')

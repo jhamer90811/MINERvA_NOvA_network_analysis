@@ -20,7 +20,9 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
 
-from MINERvA_NOvA_network_analysis import caffe_pb2
+#Include one of the following; depends on current working directory
+#from MINERvA_NOvA_network_analysis import caffe_pb2
+import caffe_pb2
 
 
 # %%
