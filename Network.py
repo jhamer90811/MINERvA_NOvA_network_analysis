@@ -1959,7 +1959,7 @@ class Network:
 
         num_conv_layers = len(conv_layers)
 
-        if conv_layers == 0:
+        if num_conv_layers == 0:
             return 0, []
 
         for layer in conv_layers:
@@ -2125,6 +2125,9 @@ class Network:
 
         num_layers = len(layers)
 
+        if num_layers == 0:
+            return 0, []
+
         square_kernels = []
 
         for layer in layers:
@@ -2188,6 +2191,9 @@ class Network:
 
         num_layers = len(layers)
 
+        if num_layers == 0:
+            return 0, []
+
         horiz_kernels = []
 
         for layer in layers:
@@ -2250,6 +2256,9 @@ class Network:
                       'inception' not in layer]
 
         num_layers = len(layers)
+
+        if num_layers == 0:
+            return 0, []
 
         vert_kernels = []
 
@@ -2620,6 +2629,9 @@ class Network:
 
         num_layers = len(layers)
 
+        if num_layers == 0:
+            return 0, []
+
         for layer in layers:
             if ('inception' in layer) and ignore_inception:
                 num_layers -= 1
@@ -2815,8 +2827,10 @@ class Network:
                                      inception_unit=inception_unit,
                                      include_pooling=include_pooling)[0]
             features = self.layers[l].layerParams['num_output']
-
-            stats.append((features / d, l))
+            if d == 0:
+                stats.append((0,l))
+            else:
+                stats.append((features / d, l))
 
         if key == 'MAX':
             if not stats:
@@ -2906,8 +2920,10 @@ class Network:
                 return 0
 
             features = self.layers[l].layerParams['num_output']
-
-            stats.append((features / kernel_dim, l))
+            if kernel_dim == 0:
+                stats.append((0,l))
+            else:
+                stats.append((features / kernel_dim, l))
 
         if key == 'MAX':
             if not stats:
@@ -3006,7 +3022,10 @@ class Network:
                 print('Invalid kernel dimension: ', dim)
                 return 0
 
-            stats.append((kernel_dim / d, l))
+            if d == 0:
+                stats.append((0, l))
+            else:
+                stats.append((kernel_dim / d, l))
 
         if key == 'MAX':
             if not stats:
