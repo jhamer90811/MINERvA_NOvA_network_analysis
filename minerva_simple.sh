@@ -1,11 +1,11 @@
 #!/bin/bash
 #PBS -S /bin/bash
-# -N minerva_network_topology_analysis
-#-j oe
-#-o /data/jhamer/minerva_output/minerva-simple-log.txt
-#-l nodes=1:amd32,walltime=00:05:00
-#-A minervaG
-#-q amd32
+#PBS -N minerva_network_topology_analysis
+#PBS -j oe
+#PBS -o /data/jhamer/minerva_output/minerva-simple-log.txt
+#PBS -l nodes=1:amd32,walltime=00:05:00
+#PBS -A minervaG
+#PBS -q amd32
 
 echo "Job ${PBS_JOBNAME} submitted from ${PBS_O_HOST} started "`date`" jobid ${PBS_JOBID}"
 
