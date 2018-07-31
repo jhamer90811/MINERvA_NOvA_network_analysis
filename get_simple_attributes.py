@@ -71,8 +71,10 @@ if __name__ == '__main__':
     # Perform data generation here
     start_time = time.time()
     df = pd.DataFrame()
-    print(os.listdir(input_path))
-    for g in os.listdir(input_path):
+    genealogies = [int(g) for g in os.listdir(input_path) if len(g) == 5]
+    genealogies.sort()
+    genealogies = [str(g).zfill(5) for g in genealogies]
+    for g in genealogies:
         if len(g) != 5 or int(start_index) > int(g) > int(end_index):
             continue
         else:
