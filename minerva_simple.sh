@@ -2,8 +2,8 @@
 #PBS -S /bin/bash
 #PBS -N minerva_network_topology_analysis
 #PBS -j oe
-#PBS -o /data/jhamer/minerva_output/minerva-simple-log.txt
-#PBS -l nodes=1:amd32,walltime=00:05:00
+#PBS -o /data/jhamer/minerva_output/minerva-simple-log.out
+#PBS -l walltime=00:05:00
 #PBS -A minervaG
 #PBS -q amd32
 
