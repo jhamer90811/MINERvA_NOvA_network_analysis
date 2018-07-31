@@ -73,9 +73,7 @@ if __name__ == '__main__':
     df = pd.DataFrame()
     print(os.listdir(input_path))
     for g in os.listdir(input_path):
-        if len(g) < 5 or int(g) > int(end_index):
-            continue
-        elif int(g) < int(start_index):
+        if len(g) != 5 or int(start_index) > int(g) > int(end_index):
             continue
         else:
             g_path = input_path + '/' + g
