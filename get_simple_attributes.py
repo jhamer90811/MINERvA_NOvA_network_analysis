@@ -74,13 +74,15 @@ if __name__ == '__main__':
     genealogies = [int(g) for g in os.listdir(input_path) if len(g) == 5]
     genealogies.sort()
     genealogies = [str(g).zfill(5) for g in genealogies]
+    print('Start index: {}; end index: {}'.format(start_index,end_index))
     for g in genealogies:
-        if len(g) != 5 or int(start_index) > int(g) > int(end_index):
+        print('Current genealogy: {}'.format(g))
+        if int(end_index) < int(g) < int(start_index):
             continue
         else:
             g_path = input_path + '/' + g
             for N in os.listdir(g_path):
-                if 'train_test_' not in N:
+                if 'train_test_' not in N or 'caffemodel' in N or 'solverstate' in N:
                     continue
                 else:
                     net_id = N[11:-9]
