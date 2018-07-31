@@ -19,3 +19,5 @@ export MODE='minerva'
 
 singularity exec network_topology.simg cd MINERvA_NOvA_network_analysis/ &&\
 python3 get_simple_attributes.py ${INPUT_PATH} ${OUTPUT_PATH} ${START_INDEX} ${END_INDEX} ${MODE}
+
+exit
