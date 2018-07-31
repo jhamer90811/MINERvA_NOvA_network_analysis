@@ -52,7 +52,10 @@ def scrape_output(path, network_name, mode):
         acc = ()
         with open(output) as op:
             for l in op.readlines():
-                a = float(l[l.index('=') + 1:])
+                try:
+                    a = float(l[l.index('=') + 1:])
+                except ValueError:
+                    a = np.NaN
                 acc = acc + (a,)
         return acc
     elif mode == 'nova':
@@ -60,7 +63,10 @@ def scrape_output(path, network_name, mode):
         acc = ()
         with open(output) as op:
             for l in op.readlines()[len(op.readlines())-2:]:
-                a = float(l[l.index('=') + 1:])
+                try:
+                    a = float(l[l.index('=') + 1:])
+                except ValueError:
+                    a = np.NaN
                 acc = acc + (a,)
             return acc
     else:
