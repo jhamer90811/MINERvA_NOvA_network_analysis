@@ -318,14 +318,14 @@ class Network:
         # NOTE: ROUNDING MAY OCCUR-NEED TO IMPLEMENT CHECK TO ENSURE THAT THE
         # KERNEL FITS EVENLY INTO THE INPUT GRID.
 
-        if not op_grid_h - int(op_grid_h) == 0:
-            print("WARNING: KERNEL_H DOES NOT EVENLY DIVIDE INPUT_H in " +
-                  output_layer.name)
-            print(op_grid_h)
-        if not op_grid_w - int(op_grid_w) == 0:
-            print("WARNING: KERNEL_W DOES NOT EVENLY DIVIDE INPUT_W in " +
-                  output_layer.name)
-            print(op_grid_w)
+        # if not op_grid_h - int(op_grid_h) == 0:
+            # print("WARNING: KERNEL_H DOES NOT EVENLY DIVIDE INPUT_H in " +
+            #     output_layer.name)
+            # print(op_grid_h)
+        # if not op_grid_w - int(op_grid_w) == 0:
+            # print("WARNING: KERNEL_W DOES NOT EVENLY DIVIDE INPUT_W in " +
+            #      output_layer.name)
+            # print(op_grid_w)
         output_grid = np.zeros((op_channels, int(op_grid_h),
                                 int(op_grid_w)))
         return input_grid, output_grid
