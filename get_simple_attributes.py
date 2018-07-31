@@ -320,7 +320,7 @@ if __name__ == '__main__':
                     attributes.append(net.grid_reduction_total(key='AVG', phases=['ALL', 'TEST'], dim='w'))
                     columns.append('avg_grid_reduction_width_total')
                     # prop_nonoverlapping; not including 1x1; including pooling and inception
-                    attributes.append(net.prop_nonoverlapping(phases=['ALL', 'TEST']))
+                    attributes.append(net.prop_nonoverlapping(phases=['ALL', 'TEST'])[0])
                     columns.append('prop_nonoverlapping')
                     # min_stride_h; pooling and inception included; 1x1 not included
                     attributes.append(net.stride_dims(key='MIN', phases=['ALL', 'TEST'], dim='h')[0])
