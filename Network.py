@@ -98,7 +98,7 @@ class Network:
                     new_bottom = [nb for p, nb in trash_list if p == b][0]
                     while not exists:
                         if new_bottom[0] in [t[0] for t in trash_list]:
-                            new_bottom = [nb for p,nb in trash_list if p == new_bottom[0]][0]
+                            new_bottom = [nb for p, nb in trash_list if p == new_bottom[0]][0]
                         else:
                             exists = True
                     self.layers[layer_name].bottom.append(new_bottom[0])
@@ -1035,16 +1035,22 @@ class Network:
                 unique_paths.append(path)
         all_paths = unique_paths
         if key == 'MAX':
+            if not all_paths:
+                return np.NaN, None
             return_value = max([len(path) for path in all_paths])
             return_list = [path for path in all_paths if len(path) == return_value]
             return return_value, return_list
 
         elif key == 'MIN':
+            if not all_paths:
+                return np.NaN, None
             return_value = min([len(path) for path in all_paths])
             return_list = [path for path in all_paths if len(path) == return_value]
             return return_value, return_list
 
         elif key == 'AVG':
+            if not all_paths:
+                return np.NaN
             return_value = np.mean([len(path) for path in all_paths])
             return return_value
         else:
@@ -1418,6 +1424,8 @@ class Network:
                      self.layers[layer].phase in phases]
 
         if key == 'MAX':
+            if not IP_layers:
+                return np.NaN, None
             return_value = max([self.layers[layer].layerParams['num_output'] for
                                 layer in IP_layers])
             return_list = [layer for layer in IP_layers
@@ -1425,6 +1433,8 @@ class Network:
             return return_value, return_list
 
         elif key == 'MIN':
+            if not IP_layers:
+                return np.NaN, None
             return_value = min([self.layers[layer].layerParams['num_output'] for
                                 layer in IP_layers])
             return_list = [layer for layer in IP_layers
@@ -1432,6 +1442,8 @@ class Network:
             return return_value, return_list
 
         elif key == 'AVG':
+            if not IP_layers:
+                return np.NaN
             return_value = np.mean([self.layers[layer].layerParams['num_output'] for
                                     layer in IP_layers])
             return return_value
@@ -1465,6 +1477,8 @@ class Network:
                      self.layers[layer].type == 'InnerProduct' and
                      self.layers[layer].phase in phases]
         if key == 'MAX':
+            if not IP_layers:
+                return np.NaN, None
             return_value = max([self.layers[layer].layerParams['num_output'] *
                                 self.layers[layer].layerParams['num_input'] for
                                 layer in IP_layers])
@@ -1474,6 +1488,8 @@ class Network:
             return return_value, return_list
 
         elif key == 'MIN':
+            if not IP_layers:
+                return np.NaN, None
             return_value = min([self.layers[layer].layerParams['num_output'] *
                                 self.layers[layer].layerParams['num_input'] for
                                 layer in IP_layers])
@@ -1483,6 +1499,8 @@ class Network:
             return return_value, return_list
 
         elif key == 'AVG':
+            if not IP_layers:
+                return np.NaN
             return_value = np.mean([self.layers[layer].layerParams['num_output'] *
                                     self.layers[layer].layerParams['num_input'] for
                                     layer in IP_layers])
@@ -1570,14 +1588,20 @@ class Network:
                     top not in ignore_types]
             widths.append((len(tops), split))
         if key == 'MAX':
+            if not widths:
+                return np.NaN, None
             return_value = max([width[0] for width in widths])
             return_list = [width[1] for width in widths if width[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not widths:
+                return np.NaN, None
             return_value = min([width[0] for width in widths])
             return_list = [width[1] for width in widths if width[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not widths:
+                return np.NaN
             return_value = np.mean([width[0] for width in widths])
             return return_value
         else:
@@ -1647,14 +1671,20 @@ class Network:
             bottoms = [bottom for bottom in self.layers[concat].bottom]
             widths.append((len(bottoms), concat))
         if key == 'MAX':
+            if not widths:
+                return np.NaN, None
             return_value = max([width[0] for width in widths])
             return_list = [width[1] for width in widths if width[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not widths:
+                return np.NaN, None
             return_value = min([width[0] for width in widths])
             return_list = [width[1] for width in widths if width[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not widths:
+                return np.NaN
             return_value = np.mean([width[0] for width in widths])
             return return_value
         else:
@@ -1700,14 +1730,20 @@ class Network:
             areas.append((area, layer))
 
         if key == 'MAX':
+            if not areas:
+                return np.NaN, None
             return_value = max([area[0] for area in areas])
             return_list = [area[1] for area in areas if area[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not areas:
+                return np.NaN, None
             return_value = min([area[0] for area in areas])
             return_list = [area[1] for area in areas if area[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not areas:
+                return np.NaN
             return_value = np.mean([area[0] for area in areas])
             return return_value
         else:
@@ -1753,14 +1789,20 @@ class Network:
             features.append((feat, layer))
 
         if key == 'MAX':
+            if not features:
+                return np.NaN, None
             return_value = max([feat[0] for feat in features])
             return_list = [feat[1] for feat in features if feat[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not features:
+                return np.NaN, None
             return_value = min([feat[0] for feat in features])
             return_list = [feat[1] for feat in features if feat[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not features:
+                return np.NaN
             return_value = np.mean([feat[0] for feat in features])
             return return_value
         else:
@@ -2680,14 +2722,20 @@ class Network:
             layer_stats.append((stat, layer))
 
         if key == 'MAX':
+            if not layer_stats:
+                return np.NaN, None
             return_value = max([l[0] for l in layer_stats])
             return_list = [l[1] for l in layer_stats if l[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not layer_stats:
+                return np.NaN, None
             return_value = min([l[0] for l in layer_stats])
             return_list = [l[1] for l in layer_stats if l[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not layer_stats:
+                return np.NaN
             return_value = np.mean([l[0] for l in layer_stats])
             return return_value
         else:
@@ -2771,14 +2819,20 @@ class Network:
             stats.append((features / d, l))
 
         if key == 'MAX':
+            if not stats:
+                return np.NaN, None
             return_value = max([stat[0] for stat in stats])
             return_list = [stat[1] for stat in stats if stat[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not stats:
+                return np.NaN, None
             return_value = min([stat[0] for stat in stats])
             return_list = [stat[1] for stat in stats if stat[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not stats:
+                return np.NaN
             return_value = np.mean([stat[0] for stat in stats])
             return return_value
         else:
@@ -2856,14 +2910,20 @@ class Network:
             stats.append((features / kernel_dim, l))
 
         if key == 'MAX':
+            if not stats:
+                return np.NaN, None
             return_value = max([stat[0] for stat in stats])
             return_list = [stat[1] for stat in stats if stat[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not stats:
+                return np.NaN, None
             return_value = min([stat[0] for stat in stats])
             return_list = [stat[1] for stat in stats if stat[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not stats:
+                return np.NaN
             return_value = np.mean([stat[0] for stat in stats])
             return return_value
         else:
@@ -2949,14 +3009,20 @@ class Network:
             stats.append((kernel_dim / d, l))
 
         if key == 'MAX':
+            if not stats:
+                return np.NaN, None
             return_value = max([stat[0] for stat in stats])
             return_list = [stat[1] for stat in stats if stat[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not stats:
+                return np.NaN, None
             return_value = min([stat[0] for stat in stats])
             return_list = [stat[1] for stat in stats if stat[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not stats:
+                return np.NaN
             return_value = np.mean([stat[0] for stat in stats])
             return return_value
         else:
