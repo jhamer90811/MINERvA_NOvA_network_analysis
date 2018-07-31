@@ -71,9 +71,10 @@ if __name__ == '__main__':
     # Perform data generation here
     start_time = time.time()
     df = pd.DataFrame()
+    print(os.listdir(input_path))
     for g in os.listdir(input_path):
         if len(g) < 5 or int(g) > int(end_index):
-            break
+            continue
         elif int(g) < int(start_index):
             continue
         else:
@@ -394,6 +395,6 @@ if __name__ == '__main__':
 
                     new_row = pd.DataFrame.from_dict({net_id: attributes}, orient='index', columns=columns)
                     df = df.append(new_row)
-    output_name = output_path + '/' + mode + '-' + start_index + '-' + end_index + '.csv'
+    output_name = output_path + '/' + mode + '-simple-' + start_index + '-' + end_index + '.csv'
     df.to_csv(output_name)
     print('Total time elapsed: {} s'.format(time.time()-start_time))
