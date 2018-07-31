@@ -261,7 +261,7 @@ class Network:
 
         for bottom in self.layers[layer_name].bottom:
             bottom_layer = self.layers[bottom]
-            if bottom_layer.type in ['Convolution', 'Pooling', 'LRN']:
+            if bottom_layer.type in ['Convolution', 'Pooling', 'LRN', 'Concat']:
                 input_grid = bottom_layer.layerParams['output_grid']
                 arrays = arrays + [input_grid]
                 self.layers[layer_name].layerParams['input_grid'].append(input_grid)
