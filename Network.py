@@ -20,8 +20,8 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
 
-#Include one of the following; depends on current working directory
-#from MINERvA_NOvA_network_analysis import caffe_pb2
+# Include one of the following; depends on current working directory
+# from MINERvA_NOvA_network_analysis import caffe_pb2
 import caffe_pb2
 
 
@@ -73,6 +73,7 @@ class Network:
         self.inputLayers = []
         trash_list = []
         for layer in tmp_net.layer:
+            skip = False
             # Need special handler for inception concatenators in NOVA networks
             if layer.type == 'Concat' and 'inception' in layer.name:
                 layer_name = layer.top[0]
@@ -87,9 +88,23 @@ class Network:
             self.layers[layer_name] = Layer(caffeLayer=layer)
             for b in layer.bottom:
                 if b in [t[0] for t in trash_list]:
+                    if self.layers[layer_name].bottom == layer.bottom:
+                        self.layers[layer_name].bottom = []
+                    if layer.bottom == layer.top:
+                        trash = self.layers.pop(layer_name)
+                        skip = True
+                        break
+                    exists = False
                     new_bottom = [nb for p, nb in trash_list if p == b][0]
-                    self.layers[layer_name].bottom = new_bottom
-                    trash_list.remove((b, new_bottom))
+                    while not exists:
+                        if new_bottom[0] in [t[0] for t in trash_list]:
+                            new_bottom = [nb for p,nb in trash_list if p == new_bottom[0]][0]
+                        else:
+                            exists = True
+                    self.layers[layer_name].bottom.append(new_bottom[0])
+                    # trash_list.remove((b, new_bottom))
+            if skip:
+                continue
             if layer.name == 'finalip':
                 self.layers[layer_name].name = layer_name
             # Build dummy layers, if necessary:
@@ -246,7 +261,7 @@ class Network:
 
         for bottom in self.layers[layer_name].bottom:
             bottom_layer = self.layers[bottom]
-            if bottom_layer.type in ['Convolution', 'Pooling']:
+            if bottom_layer.type in ['Convolution', 'Pooling', 'LRN']:
                 input_grid = bottom_layer.layerParams['output_grid']
                 arrays = arrays + [input_grid]
                 self.layers[layer_name].layerParams['input_grid'].append(input_grid)
@@ -313,7 +328,6 @@ class Network:
             print(op_grid_w)
         output_grid = np.zeros((op_channels, int(op_grid_h),
                                 int(op_grid_w)))
-
         return input_grid, output_grid
 
     # noinspection PyTypeChecker
@@ -1014,6 +1028,12 @@ class Network:
             phases = ['ALL']
         all_paths = self.get_max_paths(start_layer, weightsOnly, convOnly,
                                        phases, inception_unit, include_pooling)
+        all_paths = [p[:-1] for p in all_paths]
+        unique_paths = []
+        for path in all_paths:
+            if path not in unique_paths:
+                unique_paths.append(path)
+        all_paths = unique_paths
         if key == 'MAX':
             return_value = max([len(path) for path in all_paths])
             return_list = [path for path in all_paths if len(path) == return_value]
@@ -2308,7 +2328,7 @@ class Network:
                                    include_1x1=False, dim='a'):
         """
         Uses 'key' to return a summary statistic of the percent reduction in
-        activation grid 'dim' between consecutive convolutional layers.Percent 
+        activation grid 'dim' between consecutive convolutional layers. Percent
         reduction is computed as 1 - (output_dim/input_dim) and 
         represents the amound of area/height/width of the input_grid which is
         lost in passing through the convolution, pooling, or inception.
@@ -2370,9 +2390,13 @@ class Network:
                             or check_1x1:
                         remove_list.append(layer)
             paths[i] = [layer for layer in paths[i] if layer not in remove_list]
-
-        paths = np.unique(np.ravel(paths))
-
+        # paths = np.unique(np.ravel(paths))
+        unique_paths = []
+        for path in paths:
+            for p in path:
+                if p not in unique_paths:
+                    unique_paths.append(p)
+        paths = unique_paths
         for layer in paths:
             if self.layers[layer].type not in ['Convolution', 'Pooling']:
                 continue
@@ -2398,17 +2422,24 @@ class Network:
                 return 0
 
             reductions.append((pr, layer))
+
         if key == 'MAX':
+            if not reductions:
+                return np.NaN, None
             return_value = max([reduction[0] for reduction in reductions])
             return_list = [reduction[1] for reduction in
                            reductions if reduction[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not reductions:
+                return np.NaN, None
             return_value = min([reduction[0] for reduction in reductions])
             return_list = [reduction[1] for reduction in
                            reductions if reduction[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not reductions:
+                return np.NaN
             return_value = np.mean([reduction[0] for reduction in reductions])
             return return_value
 
@@ -2481,18 +2512,23 @@ class Network:
                 return 0
 
             reductions.append((pr, pair))
-
         if key == 'MAX':
+            if not reductions:
+                return np.NaN, None
             return_value = max([reduction[0] for reduction in reductions])
             return_list = [reduction[1] for reduction in
                            reductions if reduction[0] == return_value]
             return return_value, return_list
         elif key == 'MIN':
+            if not reductions:
+                return np.NaN, None
             return_value = min([reduction[0] for reduction in reductions])
             return_list = [reduction[1] for reduction in
                            reductions if reduction[0] == return_value]
             return return_value, return_list
         elif key == 'AVG':
+            if not reductions:
+                return np.NaN
             return_value = np.mean([reduction[0] for reduction in reductions])
             return return_value
 
@@ -4330,7 +4366,8 @@ class Layer:
                                      inputLayer['width'])),
             'channels': inputLayer['channels'],
             'height': inputLayer['height'],
-            'width': inputLayer['width']
+            'width': inputLayer['width'],
+            'num_output': inputLayer['channels']
         }
 
     @staticmethod
