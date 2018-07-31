@@ -75,9 +75,10 @@ if __name__ == '__main__':
     genealogies.sort()
     genealogies = [str(g).zfill(5) for g in genealogies]
     print('Start index: {}; end index: {}'.format(start_index,end_index))
+    missing_op = 0
     for g in genealogies:
         print('Current genealogy: {}'.format(g))
-        if int(end_index) < int(g) < int(start_index):
+        if int(end_index) < int(g) or int(g) < int(start_index):
             continue
         else:
             g_path = input_path + '/' + g
@@ -89,13 +90,16 @@ if __name__ == '__main__':
                     print('Working on {}...'.format(net_id))
                     if 'output_' + net_id + '.txt_test.txt' not in os.listdir(g_path) and mode == 'minerva':
                         print('Output file not found for {}. Skipping.'.format(net_id))
+                        missing_op+=1
                         continue
                     if 'output_' + net_id + '.txt' not in os.listdir(g_path) and mode == 'nova':
                         print('Output file not found for {}. Skipping.'.format(net_id))
+                        missing_op+=1
                         continue
                     accuracy = scrape_output(g_path, net_id, mode)
                     if len(accuracy) < 2:
                         print('Error in output file of {}. Skipping.'.format(net_id))
+                        missing_op+=1
                         continue
                     net_path = g_path + '/' + N
                     net = Network(net_path, mode = mode)
@@ -399,4 +403,5 @@ if __name__ == '__main__':
                     df = df.append(new_row)
     output_name = output_path + '/' + mode + '-simple-' + start_index + '-' + end_index + '.csv'
     df.to_csv(output_name)
+    print('Number of missing/corrupted output files: {}'.format(missing_op))
     print('Total time elapsed: {} s'.format(time.time()-start_time))
