@@ -312,8 +312,8 @@ class Network:
         input_grid = np.zeros((ip_channels, ip_layer_grid_h + 2 * pad_h,
                                ip_layer_grid_w + 2 * pad_w))
 
-        op_grid_h = 1 + (ip_layer_grid_h + 2 * pad_h - kernel_h) / stride_h
-        op_grid_w = 1 + (ip_layer_grid_w + 2 * pad_w - kernel_w) / stride_w
+        op_grid_h = max([1 + (ip_layer_grid_h + 2 * pad_h - kernel_h) / stride_h, 1])
+        op_grid_w = max([1 + (ip_layer_grid_w + 2 * pad_w - kernel_w) / stride_w, 1])
 
         # NOTE: ROUNDING MAY OCCUR-NEED TO IMPLEMENT CHECK TO ENSURE THAT THE
         # KERNEL FITS EVENLY INTO THE INPUT GRID.
