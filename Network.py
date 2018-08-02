@@ -21,8 +21,10 @@ from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
 
 # Include one of the following; depends on current working directory
-# from MINERvA_NOvA_network_analysis import caffe_pb2
-import caffe_pb2
+from MINERvA_NOvA_network_analysis import caffe_pb2
+
+
+# import caffe_pb2
 
 
 # %%
@@ -82,7 +84,8 @@ class Network:
             else:
                 layer_name = layer.name
             if layer.type == 'Pooling':
-                if layer.pooling_param.kernel_size == 1 or (layer.pooling_param.kernel_h == 1 and layer.pooling_param.kernel_w == 1):
+                if layer.pooling_param.kernel_size == 1 or (
+                        layer.pooling_param.kernel_h == 1 and layer.pooling_param.kernel_w == 1):
                     trash_list.append((layer_name, layer.bottom))
                     continue
             self.layers[layer_name] = Layer(caffeLayer=layer)
@@ -92,6 +95,8 @@ class Network:
                         self.layers[layer_name].bottom = []
                     if layer.bottom == layer.top:
                         trash = self.layers.pop(layer_name)
+                        if trash:
+                            pass
                         skip = True
                         break
                     exists = False
@@ -176,7 +181,8 @@ class Network:
             # updating.
             if layer.type in ['Pooling', 'Convolution', 'LRN']:
                 # add input grid, and output grid
-                self.layers[layer_name].layerParams['input_grid'], self.layers[layer_name].layerParams['output_grid'] = \
+                self.layers[layer_name].layerParams['input_grid'], \
+                self.layers[layer_name].layerParams['output_grid'] = \
                     self.get_grids(self.layers[self.layers[layer_name].bottom[0]],
                                    self.layers[layer_name])
             if layer.type in nonlinearity_list:
@@ -319,13 +325,13 @@ class Network:
         # KERNEL FITS EVENLY INTO THE INPUT GRID.
 
         # if not op_grid_h - int(op_grid_h) == 0:
-            # print("WARNING: KERNEL_H DOES NOT EVENLY DIVIDE INPUT_H in " +
-            #     output_layer.name)
-            # print(op_grid_h)
+        # print("WARNING: KERNEL_H DOES NOT EVENLY DIVIDE INPUT_H in " +
+        #     output_layer.name)
+        # print(op_grid_h)
         # if not op_grid_w - int(op_grid_w) == 0:
-            # print("WARNING: KERNEL_W DOES NOT EVENLY DIVIDE INPUT_W in " +
-            #      output_layer.name)
-            # print(op_grid_w)
+        # print("WARNING: KERNEL_W DOES NOT EVENLY DIVIDE INPUT_W in " +
+        #      output_layer.name)
+        # print(op_grid_w)
         output_grid = np.zeros((op_channels, int(op_grid_h),
                                 int(op_grid_w)))
         return input_grid, output_grid
@@ -632,7 +638,6 @@ class Network:
                 output), where get_flow_output is the result of applying 
                 get_flow on layerPath.
         """
-
         if layerPath is None:
             layerPath = []
         if layerPath:
@@ -640,7 +645,7 @@ class Network:
                 if self.layers[layerPath[i]].name not in self.layers[layerPath[i + 1]].bottom:
                     print("Invalid path: " + layerPath[i] + "is not bottom of " +
                           layerPath[i + 1])
-                    return None
+                    return [[None, None]]
             return_list = []
             activations = A
             for i in range(len(layerPath) - 1):
@@ -648,7 +653,18 @@ class Network:
                 top_layer = self.layers[layerPath[i + 1]]
                 op_shape = top_layer.layerParams['output_grid'][0].shape
 
+                if not activations:
+                    print('List of activations in network {}, layer {}, image {} is empty.'.format(self.name,
+                                                                                                   bottom_layer.name,
+                                                                                                   bottom_layer.imgFeatures[
+                                                                                                       'id']))
+                    return [[None, None]]
+
                 flow = self._flow_once(activations, bottom_layer, top_layer)
+                if not flow:
+                    print(
+                        'Obtained empty flow from {} to {} in {}.'.format(bottom_layer.name, top_layer.name, self.name))
+                    return [[None, None]]
                 activations = [p for p in self.union_fields(flow) if
                                0 <= p[0] < op_shape[0] and 0 <= p[1] < op_shape[1]]
                 return_list.append((top_layer.name, activations))
@@ -752,15 +768,11 @@ class Network:
         layer_name, and A is a set of activations in the last element of
         layer_path.
         
-        Parameters:
-            A:
-                a list of ordered pairs
+        :param A: a list of ordered pairs
             
-            layer_path:
-                a list of layer names, each of which feeds into the next
+        :param layer_path: a list of layer names, each of which feeds into the next
             
-        Returns:
-            list of tuples of length 2
+        :returns: list of tuples of length 2
         """
 
         D = len(layer_path)
@@ -2828,7 +2840,7 @@ class Network:
                                      include_pooling=include_pooling)[0]
             features = self.layers[l].layerParams['num_output']
             if d == 0:
-                stats.append((0,l))
+                stats.append((0, l))
             else:
                 stats.append((features / d, l))
 
@@ -2921,7 +2933,7 @@ class Network:
 
             features = self.layers[l].layerParams['num_output']
             if kernel_dim == 0:
-                stats.append((0,l))
+                stats.append((0, l))
             else:
                 stats.append((features / kernel_dim, l))
 
@@ -3052,153 +3064,94 @@ class Network:
 
     ########### IMAGE HANDLER FUNCTIONS ##################
 
-    @staticmethod
-    def _prop_nonzero_activations(img, tol=0):
+    def nonzero_activations(self, ip_layer):
         """
-        Returns the proportion of pixels in the image which are greater than tol
+        Returns the number of pixels in the image which are greater than tol
         in absolute value.
         
         Parameters:
             
-            img:
-                ndarray of shape (r, c)
-            tol:
-                float; Default = 0
+            ip_layer:
+                str; name of input layer
                 
         Returns:
             float prop
         """
+        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
+            return len(self.layers[ip_layer].imgFeatures['points_2d'])
+        else:
+            return len(self.get_img_points2d(ip_layer))
 
-        r, c = img.shape
-
-        total_pixels = r * c
-
-        indices = itertools.product(range(r), range(c))
-
-        nonzero = [(i, j) for (i, j) in indices if abs(img[i, j]) > tol]
-
-        return len(nonzero) / total_pixels
-
-    @staticmethod
-    def _horiz_spread(img, tol=0):
+    def horiz_spread(self, ip_layer):
         """
         Returns the column distance between right-most and left-most activations
         which are larger than tol.
         
         Parameters:
-            img:
-                ndarray of shape (r, c) 
-            tol:
-                float; Default = 0
+            ip_layer:
+                str; name of input layer
                 
         Returns:
             int horiz_spread
         """
 
-        r, c = img.shape
+        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
+            return max([p[1] for p in self.layers[ip_layer].imgFeatures['points_2d']]) - \
+                   min([p[1] for p in self.layers[ip_layer].imgFeatures['points_2d']])
+        else:
+            pts = self.get_img_points2d(ip_layer)
+            return max([p[1] for p in pts]) - min([p[1] for p in pts])
 
-        indices = itertools.product(range(r), range(c))
-
-        nonzero = [(i, j) for (i, j) in indices if abs(img[i, j]) > tol]
-
-        left_most = min([j for (i, j) in nonzero])
-
-        right_most = max([j for (i, j) in nonzero])
-
-        return right_most - left_most
-
-    @staticmethod
-    def _vert_spread(img, tol=0):
+    def _vert_spread(self, ip_layer):
         """
-        Returns the row distance between bottom-most and upper-most activations
+        Returns the column distance between right-most and left-most activations
         which are larger than tol.
-        
+
         Parameters:
-            img:
-                ndarray of shape (r, c) 
-            tol:
-                float; Default = 0
-                
+            ip_layer:
+                str; name of input layer
+
         Returns:
-            int vert_spread
+            int horiz_spread
         """
 
-        r, c = img.shape
+        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
+            return max([p[0] for p in self.layers[ip_layer].imgFeatures['points_2d']]) - \
+                   min([p[0] for p in self.layers[ip_layer].imgFeatures['points_2d']])
+        else:
+            pts = self.get_img_points2d(ip_layer)
+            return max([p[0] for p in pts]) - min([p[1] for p in pts])
 
-        indices = itertools.product(range(r), range(c))
-
-        nonzero = [(i, j) for (i, j) in indices if abs(img[i, j]) > tol]
-
-        top_most = min([i for (i, j) in nonzero])
-
-        bottom_most = max([i for (i, j) in nonzero])
-
-        return bottom_most - top_most
-
-    @staticmethod
-    def _crop_to_nonzero(img, tol=0, pad=0):
+    def horiz_sd(self, ip_layer):
         """
-        Crops img to the smallest window containing all nonzero activations,
-        padded by pad.
-        
-        Parameters:
-            
-            img:
-                ndarray of shape (r, c) 
-            tol:
-                float; Default = 0
-            pad:
-                int; Default = 0
-            
-        Returns:
-            ndarray crop_img
+        Gives the standard deviation of column coordinates of nonzero activations.
+        :param ip_layer: str; name of input layer
+        :return: float; horiz_sd
+        """
+        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
+            points = self.layers[ip_layer].imgFeatures['points_2d']
+        else:
+            points = self.get_img_points2d(ip_layer)
+
+        horiz_coords = [p[1] for p in points]
+
+        return np.std(horiz_coords)
+
+    def vert_sd(self, ip_layer):
+        """
+        Gives the standard deviation of row coordinates of nonzero activations.
+        :param ip_layer: str; name of input layer
+        :return: float; vert_sd
         """
 
-        r, c = img.shape
+        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
+            points = self.layers[ip_layer].imgFeatures['points_2d']
+        else:
+            points = self.get_img_points2d(ip_layer)
 
-        indices = itertools.product(range(r), range(c))
+        vert_coords = [p[0] for p in points]
 
-        nonzero = [(i, j) for (i, j) in indices if abs(img[i, j]) > tol]
-
-        top_most = max([0, min([i for (i, j) in nonzero]) - pad])
-
-        bottom_most = min([r, max([i for (i, j) in nonzero]) + pad + 1])
-
-        left_most = max([0, min([j for (i, j) in nonzero]) - pad])
-
-        right_most = min([c, max([j for (i, j) in nonzero]) + pad + 1])
-
-        return img[top_most:bottom_most, left_most:right_most]
-
-    def _prop_cropped_nonzero(self, img, tol=0, pad=0):
-        """
-        Returns the proportion of activations in the cropped image padded by pad
-        which are greater than tol in absolute value.
-        
-        Parameters:
-            
-            img:
-                ndarray of shape (r, c) 
-            tol:
-                float; Default = 0
-            pad:
-                int; Default = 0
-            
-        Returns:
-            float prop
-        """
-
-        cropped_img = self._crop_to_nonzero(img, tol, pad)
-
-        r, c = cropped_img.shape
-
-        total_pixels = r * c
-
-        indices = itertools.product(range(r), range(c))
-
-        nonzero = [(i, j) for (i, j) in indices if abs(cropped_img[i, j]) > tol]
-
-        return len(nonzero) / total_pixels
+        return np.std(vert_coords)
 
     def get_img_distance(self, inputLayer, combine_channels=True, df='L2'):
         """
@@ -3724,9 +3677,18 @@ class Network:
 
         pers = ac2d.persistence(2)
         zero_pers = [p[1] for p in pers if p[0] == 0]
-        min_connected_alpha2 = max([p[1] for p in zero_pers if p[1] < float('Inf')])+0.25
+        min_connected_alpha2 = max([p[1] for p in zero_pers if p[1] < float('Inf')]) + 0.25
 
         return min_connected_alpha2
+
+    def set_min_connected_alpha22d(self, inputLayer):
+        """
+        Sets the minimal alpha^2 so that the 2d alpha complex of inputLayer's nonzero activations is connected.
+
+        :param inputLayer: str; name of input layer
+        :return: None
+        """
+        self.layers[inputLayer].imgFeatures['min_connected_alpha22d'] = self.get_min_connected_alpha22d(inputLayer)
 
     def get_min_connected_alpha23d(self, inputLayer):
         """
@@ -3739,7 +3701,8 @@ class Network:
         if 'alpha_complex3d' in self.layers[inputLayer].imgFeatures.keys():
             ac3d = self.layers[inputLayer].imgFeatures['alpha_complex3d']
         else:
-            ac3d = self.get_img_alpha_cplx3d(inputLayer, ['inf' for _ in range(self.layers[inputLayer].layerParams['channels'])])
+            ac3d = self.get_img_alpha_cplx3d(inputLayer,
+                                             ['inf' for _ in range(self.layers[inputLayer].layerParams['channels'])])
 
         mc_alpha2_list = []
         for c in ac3d:
@@ -3758,6 +3721,16 @@ class Network:
         :param cplx_type: one of 'alpha2d', 'witness2d', 'rips2d', 'alpha3d', or 'witness3d'
         :return: a list of tuples of betti numbers (b0, b1, b2, ...) for each channel
         """
+
+        if cplx_type == 'alpha2d':
+            if 'min_connected_alpha22d' in self.layers[inputLayer].imgFeatures.keys():
+                alpha2 = self.layers[inputLayer].imgFeatures['min_connected_alpha22d']
+            else:
+                alpha2 = self.get_min_connected_alpha22d(inputLayer)
+            ac2d = self.get_img_alpha_cplx2d(inputLayer, alpha2=alpha2)
+            pers = ac2d.persistence(2)
+            return ac2d.betti_numbers()
+
         cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
 
         for cplx in cplxes:
@@ -3775,7 +3748,10 @@ class Network:
         :param pers_scaler: float, between 0 and 1; the multiplier of max_persistence to determine
         :return: int; the number of generators of persistent H_0 which survive longer than pers_scaler*max_persistence.
         """
-        cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
+        if cplx_type == 'alpha2d':
+            cplxes = [self.layers[inputLayer].imgFeatures['alpha_complex2d']]
+        else:
+            cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
 
         nums = []
 
@@ -3790,7 +3766,9 @@ class Network:
         for cplx, mp in cplxes, max_pers:
             pers = cplx.persistence(2)
             zero_pers = [p[1] for p in pers if p[0] == 0]
-            nums.append(len([p for p in zero_pers if p[1]-p[0] > pers_scaler*mp]))
+            nums.append(len([p for p in zero_pers if p[1] - p[0] > pers_scaler * mp]))
+        if cplx_type == 'alpha2d':
+            return nums[0]
         return nums
 
     def get_num_persistent_holes(self, inputLayer, cplx_type='alpha2d', pers_scaler=0.5):
@@ -3803,12 +3781,15 @@ class Network:
         :param pers_scaler: float, between 0 and 1; the multiplier of max_persistence to determine
         :return: int; the number of generators of persistent H_1 which survive longer than pers_scaler*max_persistence.
         """
-        cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
+        if cplx_type == 'alpha2d':
+            cplxes = [self.layers[inputLayer].imgFeatures['alpha_complex2d']]
+        else:
+            cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
 
         nums = []
 
         if cplx_type == 'alpha2d':
-            max_pers = [self.get_min_connected_alpha22d(inputLayer)]
+            max_pers = [self.layers[inputLayer].imgFeatures['min_connected_alpha22d']]
         elif cplx_type == 'alpha3d':
             max_pers = self.get_min_connected_alpha23d(inputLayer)
         else:
@@ -3819,6 +3800,8 @@ class Network:
             pers = cplx.persistence(2)
             one_pers = [p[1] for p in pers if p[0] == 1]
             nums.append(len([p for p in one_pers if p[1] - p[0] > pers_scaler * mp]))
+        if cplx_type == 'alpha2d':
+            return nums[0]
         return nums
 
     def get_num_persistent_voids(self, inputLayer, pers_scaler=0.5):
@@ -3840,6 +3823,7 @@ class Network:
             pers = cplx.persistence(2)
             two_pers = [p[1] for p in pers if p[0] == 2]
             nums.append(len([p for p in two_pers if p[1] - p[0] > pers_scaler * mp]))
+
         return nums
 
     def get_bottleneck(self, inputLayer1, inputLayer2, cplx_type):
@@ -3851,8 +3835,12 @@ class Network:
         :param cplx_type: one of 'alpha2d', 'witness2d', 'rips2d', 'alpha3d', or 'witness3d'
         :return: list of floats; bottleneck distances for each channel
         """
-        cplxes1 = self._get_gudhi_cplxes(inputLayer1, cplx_type)
-        cplxes2 = self._get_gudhi_cplxes(inputLayer2, cplx_type)
+        if cplx_type == 'alpha2d':
+            cplxes1 = [self.layers[inputLayer1].imgFeatures['alpha_complex2d']]
+            cplxes2 = [self.layers[inputLayer2].imgFeatures['alpha_complex2d']]
+        else:
+            cplxes1 = self._get_gudhi_cplxes(inputLayer1, cplx_type)
+            cplxes2 = self._get_gudhi_cplxes(inputLayer2, cplx_type)
 
         bottlenecks = []
 
@@ -3861,8 +3849,61 @@ class Network:
             diag2 = [p[1] for p in cplx2.persistence(2)]
 
             bottlenecks.append(gd.bottleneck_distance(diag1, diag2))
+        if cplx_type == 'alpha2d':
+            return bottlenecks[0]
 
         return bottlenecks
+
+    def get_delaunay_edges(self, inputLayer):
+        """
+        Returns the number of edges in the Delaunay complex of inputLayer.
+
+        :param inputLayer: str; the layer name.
+        :return: int num_edges
+        """
+        points = self.layers[inputLayer].imgFeatures['points_2d']
+        skel1 = self.layers[inputLayer].imgFeatures['alpha_complex2d'].get_skeleton(1)
+        return len(skel1)-len(points)
+
+    def get_alpha_edges(self, inputLayer):
+        """
+        Returns the number of edges in the minimal-alpha complex of inputLayer.
+        :param inputLayer: str; the layer name.
+        :return: int num_edges
+        """
+        points = self.layers[inputLayer].imgFeatures['points_2d']
+        ac2d = gd.AlphaComplex(points, self.layers[inputLayer].imgFeatures['min_connected_alpha22d']).create_simplex_tree()
+        return len(ac2d.get_skeleton(1))-len(points)
+
+    def get_EC(self,inputLayer):
+        """
+        Returns Euler characteristic of minimal connected alpha complex of inputLayer.
+
+        :param inputLayer: str; the layer name.
+        :return: int euler_characteristic
+        """
+        betti = self.get_betti_numbers(inputLayer)
+
+        return betti[0]-betti[1]
+
+    def inter_layer_bottleneck_avg(self):
+        """
+        Returns the average bottleneck distance of Delaunay complexes across all input layers
+        :return: float inter_layer_bottleneck_avg
+        """
+        bottlenecks = []
+        for ip in self.inputLayers:
+            self.set_img_alpha_cplx2d(ip)
+        for ip1,ip2 in itertools.combinations(self.inputLayers,2):
+            pers1 = self.layers[ip1].imgFeatures['alpha_complex2d'].persistence(2)
+            pers2 = self.layers[ip2].imgFeatures['alpha_complex2d'].persistence(2)
+
+            diag1 = [p[1] for p in pers1]
+            diag2 = [p[2] for p in pers2]
+
+            bottlenecks.append(gd.bottleneck_distance(diag1, diag2))
+
+        return np.mean(bottlenecks)
 
     def draw_alpha2d(self, inputLayer):
         """
@@ -3885,7 +3926,7 @@ class Network:
         ymin = min([126 - p[0] for p in points2d])
         ymax = max([126 - p[0] for p in points2d])
 
-        simp.draw_complex(sc, sc_em, xlims=[xmin-10, xmax+10], ylims=[ymin-10, ymax+10])
+        simp.draw_complex(sc, sc_em, xlims=[xmin - 10, xmax + 10], ylims=[ymin - 10, ymax + 10])
 
     def draw_alpha3d(self, inputLayer, channel=0):
         """
@@ -3907,8 +3948,8 @@ class Network:
         xmin = min([p[1] for p in points])
         xmax = max([p[1] for p in points])
 
-        ymin = min([126-p[0] for p in points])
-        ymax = max([126-p[0] for p in points])
+        ymin = min([126 - p[0] for p in points])
+        ymax = max([126 - p[0] for p in points])
 
         zmin = min([p[2] for p in points])
         zmax = max([p[2] for p in points])
@@ -3955,6 +3996,209 @@ class Network:
             tetra.set_edgecolor('k')
             tetra.set_facecolor('g')
             ax.add_collection3d(tetra)
+
+    # %%
+
+    # ###########SCORING FUNCTIONS##########
+
+    def first_last_bottleneck(self, layer_path):
+        """
+        Returns the bottleneck distance between the alpha complexes corresponding to layer_path[0], and the flow
+        of layer_path[0] to the final layer in layer_path. Note: it is assumed that an image is already loaded into
+        the output grid of layer_path[0]. The alpha complex at each stage is generated by sampling points from all
+        possible points in the flow in such a way that the spread of the sample is maximal. The first point chosen in
+        this sampling process is always random. Also assumes that the input layer has been pre-loaded with its
+        "points2d" field. The initial sample of points chooses 10% of the input pixels. Subsequent samplings choose
+        enough points to maintain the ratio of nonzero activations to total pixels, and they account for the dilation
+        in pixel size.
+
+        :param layer_path: a list of strings which are layer names
+        :return: float; bottleneck_distance
+        """
+
+        ip_layer = layer_path[0]
+        A = self.layers[ip_layer].imgFeatures['points_2d']
+        A = gd.choose_n_farthest_points(A, nb_points=int(np.ceil(0.1 * len(A))))
+
+        ip_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+
+        for op_layer in layer_path[1:]:
+            flow = self.get_flow(A, ip_layer, [ip_layer, op_layer])[0][1]
+            if flow is None:
+                return np.NaN
+
+            ip_shape = self.layers[ip_layer].layerParams['output_grid'][0].shape
+            op_shape = self.layers[op_layer].layerParams['output_grid'][0].shape
+            ip_area = ip_shape[0] * ip_shape[1]
+            op_area = op_shape[0] * op_shape[1]
+            k_w = self.layers[op_layer].layerParams['kernel_w']
+            k_h = self.layers[op_layer].layerParams['kernel_h']
+            k_a = k_w * k_h
+            num_samples = max([int((op_area / ip_area) * len(flow) / k_a), 1])
+            for p in flow:
+                self.layers[op_layer].layerParams['output_grid'][0, p[0], p[1]] = 1
+            A = gd.choose_n_farthest_points(flow, nb_points=num_samples)
+            ip_layer = op_layer
+
+        op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+
+        ip_pers = ip_alpha.persistence(2)
+        op_pers = op_alpha.persistence(2)
+
+        ip_diag = [p[1] for p in ip_pers]
+        op_diag = [p[1] for p in op_pers]
+
+        return gd.bottleneck_distance(ip_diag, op_diag)
+
+    def avg_consecutive_bottleneck(self, layer_path):
+        """
+        Computes the average bottleneck distance between consecutive layers in layer_path.
+
+        :param layer_path: list of layer names (strings)
+        :return: float average bottleneck distance over layer_path
+        """
+        bottlenecks = []
+
+        ip_layer = layer_path[0]
+        A = self.layers[ip_layer].imgFeatures['points_2d']
+        A = gd.choose_n_farthest_points(A, nb_points=int(np.ceil(0.1 * len(A))))
+
+        for op_layer in layer_path[1:]:
+            flow = self.get_flow(A, ip_layer, [ip_layer, op_layer])[0][1]
+            if flow is None:
+                return np.NaN
+            ip_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+
+            ip_shape = self.layers[ip_layer].layerParams['output_grid'][0].shape
+            op_shape = self.layers[op_layer].layerParams['output_grid'][0].shape
+            ip_area = ip_shape[0] * ip_shape[1]
+            op_area = op_shape[0] * op_shape[1]
+            k_w = self.layers[op_layer].layerParams['kernel_w']
+            k_h = self.layers[op_layer].layerParams['kernel_h']
+            k_a = k_w * k_h
+            num_samples = max([int((op_area / ip_area) * len(flow) / k_a), 1])
+            for p in flow:
+                self.layers[op_layer].layerParams['output_grid'][0, p[0], p[1]] = 1
+            A = gd.choose_n_farthest_points(flow, nb_points=num_samples)
+            op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+            ip_pers = ip_alpha.persistence(2)
+            op_pers = op_alpha.persistence(2)
+
+            ip_diag = [p[1] for p in ip_pers]
+            op_diag = [p[1] for p in op_pers]
+
+            bottlenecks.append(gd.bottleneck_distance(ip_diag, op_diag))
+
+            ip_layer = op_layer
+
+        return np.mean(bottlenecks)
+
+    def total_bottleneck_variation(self, layer_path):
+        """
+        Returns the total variation in bottleneck distance between successive layers in layer_path. Total variation
+        is defined as \Sigma_{l=1}^{N-1}|bd_{L+1}-bd_{l}|, where l is the layer index and N is the number of layers
+        in layer_path.
+
+        :param layer_path: list of strings
+        :return: float average change in bottleneck distances
+        """
+        bottlenecks = []
+
+        ip_layer = layer_path[0]
+        A = self.layers[ip_layer].imgFeatures['points_2d']
+        A = gd.choose_n_farthest_points(A, nb_points=int(np.ceil(0.1 * len(A))))
+
+        for op_layer in layer_path[1:]:
+            flow = self.get_flow(A, ip_layer, [ip_layer, op_layer])[0][1]
+            if flow is None:
+                return np.NaN
+            ip_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+
+            ip_shape = self.layers[ip_layer].layerParams['output_grid'][0].shape
+            op_shape = self.layers[op_layer].layerParams['output_grid'][0].shape
+            ip_area = ip_shape[0] * ip_shape[1]
+            op_area = op_shape[0] * op_shape[1]
+            k_w = self.layers[op_layer].layerParams['kernel_w']
+            k_h = self.layers[op_layer].layerParams['kernel_h']
+            k_a = k_w * k_h
+            num_samples = max([int((op_area / ip_area) * len(flow) / k_a), 1])
+            for p in flow:
+                self.layers[op_layer].layerParams['output_grid'][0, p[0], p[1]] = 1
+            A = gd.choose_n_farthest_points(flow, nb_points=num_samples)
+            op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+            ip_pers = ip_alpha.persistence(2)
+            op_pers = op_alpha.persistence(2)
+
+            ip_diag = [p[1] for p in ip_pers]
+            op_diag = [p[1] for p in op_pers]
+
+            bottlenecks.append(gd.bottleneck_distance(ip_diag, op_diag))
+
+            ip_layer = op_layer
+
+        start = bottlenecks[0]
+        changes = []
+        for end in bottlenecks[1:]:
+            changes.append(abs(end - start))
+            start = end
+        return np.mean(changes)
+
+    def first_layer_bottleneck(self, ip_layer):
+        """
+        Returns the bottleneck distance between the given input_layer and the first pooling or convolutional layer which
+        acts upon it.
+
+        :param ip_layer: str, a layer name
+        :return: float bottleneck distance
+        """
+        A = self.layers[ip_layer].imgFeatures['points_2d']
+        op_layer = self.layers[ip_layer].top[0]
+        if self.layers[op_layer].type not in ['Convolution', 'Pooling']:
+            return np.NaN
+        ip_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+        A = self.get_flow(A, ip_layer, [ip_layer,op_layer])[0][1]
+        op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+
+        ip_pers = ip_alpha.persistence(2)
+        op_pers = op_alpha.persistence(2)
+
+        ip_diag = [p[1] for p in ip_pers]
+        op_diag = [p[1] for p in op_pers]
+
+        return gd.bottleneck_distance(ip_diag, op_diag)
+
+    def first_layer_min_alpha2(self, ip_layer):
+        """
+        Returns the minimal alpha2 required to produce a connected alpha-complex in the first layer following the given
+        input layer.
+        :param ip_layer: str; name of input layer
+        :return: float min_alpha2
+        """
+        A = self.layers[ip_layer].imgFeatures['points_2d']
+        op_layer = self.layers[ip_layer].top[0]
+        if self.layers[op_layer].type not in ['Convolution', 'Pooling']:
+            return np.NaN
+        A = self.get_flow(A, ip_layer, [ip_layer, op_layer])[0][1]
+
+        ac2d = gd.AlphaComplex(points = A).create_simplex_tree()
+        pers = ac2d.persistence(2)
+        zero_pers = [p[1] for p in pers if p[0] == 0]
+        return max([p[1] for p in zero_pers if p[1] < float('Inf')]) + 0.25
+
+    def first_layer_flow(self, ip_layer):
+        """
+        Returns the number of activations in the first layer after the given input layer which receive information
+        from the input.
+        :param ip_layer: str; the layer name
+        :return: int num_activations
+        """
+        A = self.layers[ip_layer].imgFeatures['points_2d']
+        op_layer = self.layers[ip_layer].top[0]
+        if self.layers[op_layer].type not in ['Convolution', 'Pooling']:
+            return np.NaN
+        A = self.get_flow(A, ip_layer, [ip_layer, op_layer])[0][1]
+
+        return len(A)
 
 
 # %%
