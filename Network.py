@@ -21,10 +21,10 @@ from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
 
 # Include one of the following; depends on current working directory
-from MINERvA_NOvA_network_analysis import caffe_pb2
+# from MINERvA_NOvA_network_analysis import caffe_pb2
 
 
-# import caffe_pb2
+import caffe_pb2
 
 
 # %%
@@ -3102,7 +3102,7 @@ class Network:
             pts = self.get_img_points2d(ip_layer)
             return max([p[1] for p in pts]) - min([p[1] for p in pts])
 
-    def _vert_spread(self, ip_layer):
+    def vert_spread(self, ip_layer):
         """
         Returns the column distance between right-most and left-most activations
         which are larger than tol.
@@ -3875,7 +3875,7 @@ class Network:
         ac2d = gd.AlphaComplex(points, self.layers[inputLayer].imgFeatures['min_connected_alpha22d']).create_simplex_tree()
         return len(ac2d.get_skeleton(1))-len(points)
 
-    def get_EC(self,inputLayer):
+    def get_EC(self, inputLayer):
         """
         Returns Euler characteristic of minimal connected alpha complex of inputLayer.
 
@@ -3894,7 +3894,7 @@ class Network:
         bottlenecks = []
         for ip in self.inputLayers:
             self.set_img_alpha_cplx2d(ip)
-        for ip1,ip2 in itertools.combinations(self.inputLayers,2):
+        for ip1,ip2 in itertools.combinations(self.inputLayers, 2):
             pers1 = self.layers[ip1].imgFeatures['alpha_complex2d'].persistence(2)
             pers2 = self.layers[ip2].imgFeatures['alpha_complex2d'].persistence(2)
 
@@ -4077,8 +4077,6 @@ class Network:
             k_h = self.layers[op_layer].layerParams['kernel_h']
             k_a = k_w * k_h
             num_samples = max([int((op_area / ip_area) * len(flow) / k_a), 1])
-            for p in flow:
-                self.layers[op_layer].layerParams['output_grid'][0, p[0], p[1]] = 1
             A = gd.choose_n_farthest_points(flow, nb_points=num_samples)
             op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
             ip_pers = ip_alpha.persistence(2)
@@ -4122,8 +4120,6 @@ class Network:
             k_h = self.layers[op_layer].layerParams['kernel_h']
             k_a = k_w * k_h
             num_samples = max([int((op_area / ip_area) * len(flow) / k_a), 1])
-            for p in flow:
-                self.layers[op_layer].layerParams['output_grid'][0, p[0], p[1]] = 1
             A = gd.choose_n_farthest_points(flow, nb_points=num_samples)
             op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
             ip_pers = ip_alpha.persistence(2)
@@ -4156,7 +4152,7 @@ class Network:
         if self.layers[op_layer].type not in ['Convolution', 'Pooling']:
             return np.NaN
         ip_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
-        A = self.get_flow(A, ip_layer, [ip_layer,op_layer])[0][1]
+        A = self.get_flow(A, ip_layer, [ip_layer, op_layer])[0][1]
         op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
 
         ip_pers = ip_alpha.persistence(2)
@@ -4180,7 +4176,7 @@ class Network:
             return np.NaN
         A = self.get_flow(A, ip_layer, [ip_layer, op_layer])[0][1]
 
-        ac2d = gd.AlphaComplex(points = A).create_simplex_tree()
+        ac2d = gd.AlphaComplex(points=A).create_simplex_tree()
         pers = ac2d.persistence(2)
         zero_pers = [p[1] for p in pers if p[0] == 0]
         return max([p[1] for p in zero_pers if p[1] < float('Inf')]) + 0.25
