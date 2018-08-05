@@ -19,10 +19,10 @@ from google.protobuf import text_format
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
+# from pathos.multiprocessing import ProcessingPool as Pool
 
 # Include one of the following; depends on current working directory
 # from MINERvA_NOvA_network_analysis import caffe_pb2
-
 
 import caffe_pb2
 
@@ -182,7 +182,7 @@ class Network:
             if layer.type in ['Pooling', 'Convolution', 'LRN']:
                 # add input grid, and output grid
                 self.layers[layer_name].layerParams['input_grid'], \
-                self.layers[layer_name].layerParams['output_grid'] = \
+                    self.layers[layer_name].layerParams['output_grid'] = \
                     self.get_grids(self.layers[self.layers[layer_name].bottom[0]],
                                    self.layers[layer_name])
             if layer.type in nonlinearity_list:
@@ -217,7 +217,7 @@ class Network:
                     'channels': input_c,
                     'height': input_h,
                     'width': input_w,
-                    'include': caffeLayer.include
+                    'include': list(caffeLayer.include)
                 }
             else:
                 return {
@@ -228,7 +228,7 @@ class Network:
                     'channels': input_c,
                     'height': input_h,
                     'width': 2 * input_w,
-                    'include': caffeLayer.include
+                    'include': list(caffeLayer.include)
                 }
         elif mode == 'nova':
             return {
@@ -239,7 +239,7 @@ class Network:
                 'channels': 1,
                 'height': 100,
                 'width': 80,
-                'include': caffeLayer.include
+                'include': list(caffeLayer.include)
             }
         else:
             print("Unexpected dataset: " + mode)
@@ -318,22 +318,20 @@ class Network:
         input_grid = np.zeros((ip_channels, ip_layer_grid_h + 2 * pad_h,
                                ip_layer_grid_w + 2 * pad_w))
 
-        op_grid_h = max([1 + (ip_layer_grid_h + 2 * pad_h - kernel_h) / stride_h, 1])
-        op_grid_w = max([1 + (ip_layer_grid_w + 2 * pad_w - kernel_w) / stride_w, 1])
+        op_grid_h = int(max([1 + (ip_layer_grid_h + 2 * pad_h - kernel_h) / stride_h, 1]))
+        op_grid_w = int(max([1 + (ip_layer_grid_w + 2 * pad_w - kernel_w) / stride_w, 1]))
 
-        # NOTE: ROUNDING MAY OCCUR-NEED TO IMPLEMENT CHECK TO ENSURE THAT THE
-        # KERNEL FITS EVENLY INTO THE INPUT GRID.
+        coverage_h = kernel_h + (op_grid_h-1)*stride_h
+        coverage_w = kernel_w + (op_grid_w-1)*stride_w
 
-        # if not op_grid_h - int(op_grid_h) == 0:
-        # print("WARNING: KERNEL_H DOES NOT EVENLY DIVIDE INPUT_H in " +
-        #     output_layer.name)
-        # print(op_grid_h)
-        # if not op_grid_w - int(op_grid_w) == 0:
-        # print("WARNING: KERNEL_W DOES NOT EVENLY DIVIDE INPUT_W in " +
-        #      output_layer.name)
-        # print(op_grid_w)
-        output_grid = np.zeros((op_channels, int(op_grid_h),
-                                int(op_grid_w)))
+        #CAFFE TRUNCATES BOUNDARY PIXELS WHEN STRIDE IS NONZERO. THE FOLLOWING LINES CORRECT THIS.
+        #IF THIS BEHAVIOR IS NOT DESIRED, COMMENT OUT THESE LINES.
+        if coverage_h < pad_h + ip_layer_grid_h:
+            op_grid_h += 1
+        if coverage_w < pad_w + ip_layer_grid_w:
+            op_grid_w += 1
+
+        output_grid = np.zeros((op_channels, op_grid_h, op_grid_w))
         return input_grid, output_grid
 
     # noinspection PyTypeChecker
@@ -654,12 +652,8 @@ class Network:
                 op_shape = top_layer.layerParams['output_grid'][0].shape
 
                 if not activations:
-                    print('List of activations in network {}, layer {}, image {} is empty.'.format(self.name,
-                                                                                                   bottom_layer.name,
-                                                                                                   bottom_layer.imgFeatures[
-                                                                                                       'id']))
+                    print('List of activations in network {}, layer {} is empty.'.format(self.name, bottom_layer.name))
                     return [[None, None]]
-
                 flow = self._flow_once(activations, bottom_layer, top_layer)
                 if not flow:
                     print(
@@ -746,6 +740,9 @@ class Network:
         pad_h = top_layer.layerParams['pad_h']
         pad_w = top_layer.layerParams['pad_w']
 
+        top_r = top_layer.layerParams['output_grid'][0].shape[0]
+        top_c = top_layer.layerParams['output_grid'][0].shape[1]
+
         return_list = []
 
         for point in A:
@@ -754,8 +751,8 @@ class Network:
 
             i1 = int(np.ceil(max([0, (i + pad_h - kernel_h) / stride_h])))
             j1 = int(np.ceil(max([0, (j + pad_w - kernel_w) / stride_w])))
-            i2 = int(np.floor((i + pad_h) / stride_h))
-            j2 = int(np.floor((j + pad_w) / stride_w))
+            i2 = min([int(np.floor((i + pad_h) / stride_h)), top_r-1])
+            j2 = min([int(np.floor((j + pad_w) / stride_w)), top_c-1])
 
             return_list.append([i1, j1, i2, j2])
 
@@ -3077,10 +3074,7 @@ class Network:
         Returns:
             float prop
         """
-        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
-            return len(self.layers[ip_layer].imgFeatures['points_2d'])
-        else:
-            return len(self.get_img_points2d(ip_layer))
+        return len(self.layers[ip_layer].imgFeatures['points_2d'])
 
     def horiz_spread(self, ip_layer):
         """
@@ -3095,12 +3089,8 @@ class Network:
             int horiz_spread
         """
 
-        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
-            return max([p[1] for p in self.layers[ip_layer].imgFeatures['points_2d']]) - \
-                   min([p[1] for p in self.layers[ip_layer].imgFeatures['points_2d']])
-        else:
-            pts = self.get_img_points2d(ip_layer)
-            return max([p[1] for p in pts]) - min([p[1] for p in pts])
+        return max([p[1] for p in self.layers[ip_layer].imgFeatures['points_2d']]) - \
+            min([p[1] for p in self.layers[ip_layer].imgFeatures['points_2d']])
 
     def vert_spread(self, ip_layer):
         """
@@ -3115,12 +3105,8 @@ class Network:
             int horiz_spread
         """
 
-        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
-            return max([p[0] for p in self.layers[ip_layer].imgFeatures['points_2d']]) - \
-                   min([p[0] for p in self.layers[ip_layer].imgFeatures['points_2d']])
-        else:
-            pts = self.get_img_points2d(ip_layer)
-            return max([p[0] for p in pts]) - min([p[1] for p in pts])
+        return max([p[0] for p in self.layers[ip_layer].imgFeatures['points_2d']]) - \
+                min([p[0] for p in self.layers[ip_layer].imgFeatures['points_2d']])
 
     def horiz_sd(self, ip_layer):
         """
@@ -3128,10 +3114,7 @@ class Network:
         :param ip_layer: str; name of input layer
         :return: float; horiz_sd
         """
-        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
-            points = self.layers[ip_layer].imgFeatures['points_2d']
-        else:
-            points = self.get_img_points2d(ip_layer)
+        points = self.layers[ip_layer].imgFeatures['points_2d']
 
         horiz_coords = [p[1] for p in points]
 
@@ -3144,10 +3127,7 @@ class Network:
         :return: float; vert_sd
         """
 
-        if 'points_2d' in self.layers[ip_layer].imgFeatures.keys():
-            points = self.layers[ip_layer].imgFeatures['points_2d']
-        else:
-            points = self.get_img_points2d(ip_layer)
+        points = self.layers[ip_layer].imgFeatures['points_2d']
 
         vert_coords = [p[0] for p in points]
 
@@ -3419,7 +3399,11 @@ class Network:
         :param inputLayer: str; name of inputLayer
         :return: a depth-2 list of indices of nonzero image activations
         """
-        return [p[:2] for p in self.get_img_points(inputLayer)[0]]
+        img = self.layers[inputLayer].layerParams['output_grid'][0]
+        row, col = img.shape
+        indices = itertools.product(range(row), range(col))
+
+        return [(i, j) for i, j in indices if img[i, j] != np.float(0)]
 
     def set_img_points2d(self, inputLayer):
         """
@@ -3441,7 +3425,7 @@ class Network:
         :return: the 2d alpha complex for inputLayer
         """
 
-        indices = self.get_img_points2d(inputLayer)
+        indices = self.layers[inputLayer].imgFeatures['points_2d']
 
         if alpha2 == 'inf':
             return gd.AlphaComplex(points=indices).create_simplex_tree()
@@ -3480,6 +3464,7 @@ class Network:
         """
 
         self.layers[inputLayer].imgFeatures['alpha_complex2d'] = self.get_img_alpha_cplx2d(inputLayer, alpha2)
+        self.layers[inputLayer].imgFeatures['alpha_complex2dPers'] = self.layers[inputLayer].imgFeatures['alpha_complex2d'].persistence(2)
 
     def set_img_alpha_cplx3d(self, inputLayer, alpha2_list, combine_channels=False):
         """
@@ -3670,12 +3655,8 @@ class Network:
         :param inputLayer: str; name of input layer
         :return: float min_connected_alpha^2
         """
-        if 'alpha_complex2d' in self.layers[inputLayer].imgFeatures.keys():
-            ac2d = self.layers[inputLayer].imgFeatures['alpha_complex2d']
-        else:
-            ac2d = self.get_img_alpha_cplx2d(inputLayer)
 
-        pers = ac2d.persistence(2)
+        pers = self.layers[inputLayer].imgFeatures['alpha_complex2dPers']
         zero_pers = [p[1] for p in pers if p[0] == 0]
         min_connected_alpha2 = max([p[1] for p in zero_pers if p[1] < float('Inf')]) + 0.25
 
@@ -3713,96 +3694,51 @@ class Network:
 
         return mc_alpha2_list
 
-    def get_betti_numbers(self, inputLayer, cplx_type='alpha2d'):
+    def get_betti_numbers(self, inputLayer):
         """
         Returns the Betti numbers of a given complex.
 
         :param inputLayer: str; name of input layer
-        :param cplx_type: one of 'alpha2d', 'witness2d', 'rips2d', 'alpha3d', or 'witness3d'
         :return: a list of tuples of betti numbers (b0, b1, b2, ...) for each channel
         """
+        alpha2 = self.layers[inputLayer].imgFeatures['min_connected_alpha22d']
 
-        if cplx_type == 'alpha2d':
-            if 'min_connected_alpha22d' in self.layers[inputLayer].imgFeatures.keys():
-                alpha2 = self.layers[inputLayer].imgFeatures['min_connected_alpha22d']
-            else:
-                alpha2 = self.get_min_connected_alpha22d(inputLayer)
-            ac2d = self.get_img_alpha_cplx2d(inputLayer, alpha2=alpha2)
-            pers = ac2d.persistence(2)
-            return ac2d.betti_numbers()
+        return self.layers[inputLayer].imgFeatures['alpha_complex2d'].persistent_betti_numbers(alpha2, alpha2)
 
-        cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
-
-        for cplx in cplxes:
-            cplx.persistence(2)
-
-        return [cplx.betti_numbers() for cplx in cplxes]
-
-    def get_num_persistent_components(self, inputLayer, cplx_type='alpha2d', pers_scaler=0.5):
+    def get_num_persistent_components(self, inputLayer, pers_scaler=0.25):
         """
         Returns a list of numbers of components of complexes which persist longer than pers_scaler*max_persistence.
         Only works for alpha complexes.
 
         :param inputLayer: str; name of input layer
-        :param cplx_type: one of 'alpha2d', 'alpha3d'
         :param pers_scaler: float, between 0 and 1; the multiplier of max_persistence to determine
         :return: int; the number of generators of persistent H_0 which survive longer than pers_scaler*max_persistence.
         """
-        if cplx_type == 'alpha2d':
-            cplxes = [self.layers[inputLayer].imgFeatures['alpha_complex2d']]
-        else:
-            cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
 
-        nums = []
+        mp = self.layers[inputLayer].imgFeatures['min_connected_alpha22d']
 
-        if cplx_type == 'alpha2d':
-            max_pers = [self.get_min_connected_alpha22d(inputLayer)]
-        elif cplx_type == 'alpha3d':
-            max_pers = self.get_min_connected_alpha23d(inputLayer)
-        else:
-            print('Invalid complex type: {}.'.format(cplx_type))
-            return None
+        pers = self.layers[inputLayer].imgFeatures['alpha_complex2dPers']
+        zero_pers = [p[1] for p in pers if p[0] == 0]
+        num = len([p for p in zero_pers if p[1] - p[0] > pers_scaler * mp])
 
-        for cplx, mp in cplxes, max_pers:
-            pers = cplx.persistence(2)
-            zero_pers = [p[1] for p in pers if p[0] == 0]
-            nums.append(len([p for p in zero_pers if p[1] - p[0] > pers_scaler * mp]))
-        if cplx_type == 'alpha2d':
-            return nums[0]
-        return nums
+        return num
 
-    def get_num_persistent_holes(self, inputLayer, cplx_type='alpha2d', pers_scaler=0.5):
+    def get_num_persistent_holes(self, inputLayer, pers_scaler=0.25):
         """
         Returns a list of numbers of holes of complexes which persist longer than pers_scaler*max_persistence.
         Only works for alpha complexes.
 
         :param inputLayer: str; name of input layer
-        :param cplx_type: one of 'alpha2d', 'alpha3d'
         :param pers_scaler: float, between 0 and 1; the multiplier of max_persistence to determine
         :return: int; the number of generators of persistent H_1 which survive longer than pers_scaler*max_persistence.
         """
-        if cplx_type == 'alpha2d':
-            cplxes = [self.layers[inputLayer].imgFeatures['alpha_complex2d']]
-        else:
-            cplxes = self._get_gudhi_cplxes(inputLayer, cplx_type)
+        mp = self.layers[inputLayer].imgFeatures['min_connected_alpha22d']
 
-        nums = []
+        pers = self.layers[inputLayer].imgFeatures['alpha_complex2dPers']
+        one_pers = [p[1] for p in pers if p[0] == 1]
+        num = len([p for p in one_pers if p[1] - p[0] > pers_scaler * mp])
 
-        if cplx_type == 'alpha2d':
-            max_pers = [self.layers[inputLayer].imgFeatures['min_connected_alpha22d']]
-        elif cplx_type == 'alpha3d':
-            max_pers = self.get_min_connected_alpha23d(inputLayer)
-        else:
-            print('Invalid complex type: {}.'.format(cplx_type))
-            return None
-
-        for cplx, mp in zip(cplxes, max_pers):
-            pers = cplx.persistence(2)
-            one_pers = [p[1] for p in pers if p[0] == 1]
-            nums.append(len([p for p in one_pers if p[1] - p[0] > pers_scaler * mp]))
-        if cplx_type == 'alpha2d':
-            return nums[0]
-        return nums
+        return num
 
     def get_num_persistent_voids(self, inputLayer, pers_scaler=0.5):
         """
@@ -3872,8 +3808,9 @@ class Network:
         :return: int num_edges
         """
         points = self.layers[inputLayer].imgFeatures['points_2d']
-        ac2d = gd.AlphaComplex(points, self.layers[inputLayer].imgFeatures['min_connected_alpha22d']).create_simplex_tree()
-        return len(ac2d.get_skeleton(1))-len(points)
+        skel1 = self.layers[inputLayer].imgFeatures['alpha_complex2d'].get_skeleton(1)
+        alpha2 = self.layers[inputLayer].imgFeatures['min_connected_alpha22d']
+        return len([p for p in skel1 if p[1] >= alpha2])-len(points)
 
     def get_EC(self, inputLayer):
         """
@@ -3892,14 +3829,12 @@ class Network:
         :return: float inter_layer_bottleneck_avg
         """
         bottlenecks = []
-        for ip in self.inputLayers:
-            self.set_img_alpha_cplx2d(ip)
         for ip1,ip2 in itertools.combinations(self.inputLayers, 2):
-            pers1 = self.layers[ip1].imgFeatures['alpha_complex2d'].persistence(2)
-            pers2 = self.layers[ip2].imgFeatures['alpha_complex2d'].persistence(2)
+            pers1 = self.layers[ip1].imgFeatures['alpha_complex2dPers']
+            pers2 = self.layers[ip2].imgFeatures['alpha_complex2dPers']
 
             diag1 = [p[1] for p in pers1]
-            diag2 = [p[2] for p in pers2]
+            diag2 = [p[1] for p in pers2]
 
             bottlenecks.append(gd.bottleneck_distance(diag1, diag2))
 
@@ -4001,19 +3936,13 @@ class Network:
 
     # ###########SCORING FUNCTIONS##########
 
-    def first_last_bottleneck(self, layer_path):
+    def bottleneck_scores(self, layer_path):
         """
-        Returns the bottleneck distance between the alpha complexes corresponding to layer_path[0], and the flow
-        of layer_path[0] to the final layer in layer_path. Note: it is assumed that an image is already loaded into
-        the output grid of layer_path[0]. The alpha complex at each stage is generated by sampling points from all
-        possible points in the flow in such a way that the spread of the sample is maximal. The first point chosen in
-        this sampling process is always random. Also assumes that the input layer has been pre-loaded with its
-        "points2d" field. The initial sample of points chooses 10% of the input pixels. Subsequent samplings choose
-        enough points to maintain the ratio of nonzero activations to total pixels, and they account for the dilation
-        in pixel size.
+        Returns a 3-tuple of scores involving the bottlenecks between alpha-complexes in consecutive layers of
+        layer_path.
 
         :param layer_path: a list of strings which are layer names
-        :return: float; bottleneck_distance
+        :return: tuple of floats; (first_last_bottleneck, avg_consecutive_bottleneck, total_bottleneck_variation)
         """
 
         ip_layer = layer_path[0]
@@ -4021,12 +3950,17 @@ class Network:
         A = gd.choose_n_farthest_points(A, nb_points=int(np.ceil(0.1 * len(A))))
 
         ip_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+        ip_pers = ip_alpha.persistence(2)
+        ip_diag = [p[1] for p in ip_pers]
+        start_pers = ip_alpha.persistence(2)
+
+        bottlenecks = []
 
         for op_layer in layer_path[1:]:
             flow = self.get_flow(A, ip_layer, [ip_layer, op_layer])[0][1]
-            if flow is None:
-                return np.NaN
-
+            if flow is None or flow == []:
+                print("ip_layer: {}, op_layer: {}. Exiting".format(ip_layer, op_layer))
+                return np.NaN, np.NaN, np.NaN
             ip_shape = self.layers[ip_layer].layerParams['output_grid'][0].shape
             op_shape = self.layers[op_layer].layerParams['output_grid'][0].shape
             ip_area = ip_shape[0] * ip_shape[1]
@@ -4034,21 +3968,30 @@ class Network:
             k_w = self.layers[op_layer].layerParams['kernel_w']
             k_h = self.layers[op_layer].layerParams['kernel_h']
             k_a = k_w * k_h
-            num_samples = max([int((op_area / ip_area) * len(flow) / k_a), 1])
-            for p in flow:
-                self.layers[op_layer].layerParams['output_grid'][0, p[0], p[1]] = 1
+            num_samples = int((op_area / ip_area) * len(flow) / k_a)
+            if num_samples <= 0:
+                num_samples = 1
             A = gd.choose_n_farthest_points(flow, nb_points=num_samples)
+            op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+            op_pers = op_alpha.persistence(2)
+            op_diag = [p[1] for p in op_pers]
+
+            bottlenecks.append(gd.bottleneck_distance(ip_diag, op_diag))
+
             ip_layer = op_layer
+            ip_diag = op_diag
 
-        op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
+        end_pers = gd.AlphaComplex(points=A).create_simplex_tree().persistence(2)
+        start_diag = [p[1] for p in start_pers]
+        end_diag = [p[1] for p in end_pers]
 
-        ip_pers = ip_alpha.persistence(2)
-        op_pers = op_alpha.persistence(2)
+        start = bottlenecks[0]
+        changes = []
+        for end in bottlenecks[1:]:
+            changes.append(abs(end - start))
+            start = end
 
-        ip_diag = [p[1] for p in ip_pers]
-        op_diag = [p[1] for p in op_pers]
-
-        return gd.bottleneck_distance(ip_diag, op_diag)
+        return gd.bottleneck_distance(start_diag, end_diag), np.mean(bottlenecks), sum(changes)
 
     def avg_consecutive_bottleneck(self, layer_path):
         """
@@ -4139,10 +4082,9 @@ class Network:
             start = end
         return np.mean(changes)
 
-    def first_layer_bottleneck(self, ip_layer):
+    def first_layer_scores(self, ip_layer):
         """
-        Returns the bottleneck distance between the given input_layer and the first pooling or convolutional layer which
-        acts upon it.
+        Returns a tuple of scores based on the first layer following an input layer.
 
         :param ip_layer: str, a layer name
         :return: float bottleneck distance
@@ -4150,7 +4092,7 @@ class Network:
         A = self.layers[ip_layer].imgFeatures['points_2d']
         op_layer = self.layers[ip_layer].top[0]
         if self.layers[op_layer].type not in ['Convolution', 'Pooling']:
-            return np.NaN
+            return np.NaN,np.NaN
         ip_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
         A = self.get_flow(A, ip_layer, [ip_layer, op_layer])[0][1]
         op_alpha = gd.AlphaComplex(points=A).create_simplex_tree()
@@ -4161,7 +4103,15 @@ class Network:
         ip_diag = [p[1] for p in ip_pers]
         op_diag = [p[1] for p in op_pers]
 
-        return gd.bottleneck_distance(ip_diag, op_diag)
+        zero_pers = [p[1] for p in op_pers if p[0] == 0]
+        if not zero_pers or not ip_diag or not op_diag:
+            return np.NaN, np.NaN
+        if len(zero_pers) == 1:
+            min_alpha2 = 0
+        else:
+            min_alpha2 = max([p[1] for p in zero_pers if p[1] < float('Inf')]) + 0.25
+
+        return gd.bottleneck_distance(ip_diag, op_diag), min_alpha2
 
     def first_layer_min_alpha2(self, ip_layer):
         """
@@ -4331,7 +4281,7 @@ class Layer:
             if caffeLayer:
                 self.name = caffeLayer.name
                 self.type = caffeLayer.type
-                self.bottom = caffeLayer.bottom
+                self.bottom = list(caffeLayer.bottom)
                 self.top = []
                 self.imgFeatures = {}
                 if caffeLayer.include:
@@ -4463,7 +4413,7 @@ class Layer:
     def _getSliceParams(caffeLayer):
         return {
             'axis': caffeLayer.slice_param.axis,
-            'slice_point': caffeLayer.slice_param.slice_point
+            'slice_point': list(caffeLayer.slice_param.slice_point)
         }
 
     @staticmethod
@@ -4475,10 +4425,10 @@ class Layer:
             height = dims[2]
             width = dims[3]
         else:
-            num = caffeLayer.dummy_data_param.num
-            channels = caffeLayer.dummy_data_param.channels
-            height = caffeLayer.dummy_data_param.height
-            width = caffeLayer.dummy_data_param.width
+            num = list(caffeLayer.dummy_data_param.num)
+            channels = list(caffeLayer.dummy_data_param.channels)
+            height = list(caffeLayer.dummy_data_param.height)
+            width = list(caffeLayer.dummy_data_param.width)
         return {
             'data_filler': (caffeLayer.dummy_data_param.data_filler[0].type,
                             caffeLayer.dummy_data_param.data_filler[0].value),
@@ -4522,7 +4472,7 @@ class Layer:
         return {
             'num_output': caffeLayer.convolution_param.num_output,
             'bias_term': caffeLayer.convolution_param.bias_term,
-            'dilation': caffeLayer.convolution_param.dilation,
+            'dilation': list(caffeLayer.convolution_param.dilation),
             'pad_h': pad_h,
             'pad_w': pad_w,
             'kernel_h': kernel_h,
@@ -4642,7 +4592,7 @@ class Layer:
     @staticmethod
     def _getSigmoidCrossEntropyLossParams(caffeLayer):
         return {
-            'loss_weight': caffeLayer.loss_weight
+            'loss_weight': list(caffeLayer.loss_weight)
         }
 
     @staticmethod
@@ -4678,7 +4628,7 @@ class Layer:
             op = 'MAX'
         return {
             'operation': op,
-            'coeff': caffeLayer.eltwise_param.coeff
+            'coeff': list(caffeLayer.eltwise_param.coeff)
         }
 
     # Function to extract params from
@@ -4723,3 +4673,6 @@ class Layer:
                     print(key, ': ', self.imgFeatures[key])
             else:
                 print('No image features loaded.')
+
+
+

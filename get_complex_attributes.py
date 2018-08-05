@@ -22,13 +22,16 @@ NOTE: ALL COMMAND LINE INPUTS SHOULD BE SURROUNDED BY QUOTES
 import os
 import sys
 import time
+import itertools
+# from pathos.multiprocessing import ProcessingPool as Pool
+from multiprocessing.pool import Pool
 
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 
-# from Network import Network
-from MINERvA_NOvA_network_analysis.Network import Network
+from Network import Network
+# from MINERvA_NOvA_network_analysis.Network import Network
 
 input_path = sys.argv[1]
 output_path = sys.argv[2]
@@ -52,14 +55,14 @@ def scrape_output(path, network_name, mode):
     """
     if mode == 'minerva':
         output = path + '/' + 'output_' + network_name + '.txt_test.txt'
-        acc = ()
+        acc = []
         with open(output) as op:
             for l in op.readlines():
                 try:
                     a = float(l[l.index('=') + 1:])
                 except ValueError:
                     a = np.NaN
-                acc = acc + (a,)
+                acc = acc + [a]
         return acc
     elif mode == 'nova':
         output = path + '/' + 'output_' + network_name + '.txt'
@@ -70,10 +73,23 @@ def scrape_output(path, network_name, mode):
                     a = float(l[l.index('=') + 1:])
                 except ValueError:
                     a = np.NaN
-                acc = acc + (a,)
+                acc = acc + [a]
             return acc
     else:
         return None
+
+
+def get_max_paths(ip):
+    Net = ip[0]
+    ipLayer = ip[1]
+    max_paths = Net.get_max_paths(ipLayer, convOnly=True, phases=['ALL', 'TEST'],
+                                  include_pooling=True)
+    unique_paths = []
+    for p in max_paths:
+        if p[:-1] not in unique_paths:
+            unique_paths.append(p[:-1])
+
+    return unique_paths
 
 
 if __name__ == '__main__':
@@ -86,14 +102,37 @@ if __name__ == '__main__':
     genealogies = [str(g).zfill(5) for g in genealogies]
     print('Start index: {}; end index: {}'.format(start_index, end_index))
     missing_op = 0
-    num_training_imgs = 200
+    num_training_imgs = 50
+    g_times = []
+    N_times = []
+    img_times = []
+    pool = Pool()
+
+    img_columns = ['nonzero_activations', 'horiz_spread', 'vert_spread', 'horiz_sd', 'vert_sd', 'min_alpha2',
+                   'min_alpha2_betti_0', 'min_alpha2_betti_1', 'num_persistent_components', 'num_persistent_holes',
+                   'num_delaunay_edges', 'num_min_alpha_edges', 'inter_layer_bottleneck_avg','first_last_bottleneck',
+                   'avg_consecutive_bottleneck', 'total_bottleneck_variation', 'first_layer_bottleneck',
+                   'first_layer_min_alpha2']
+    feature_names = img_columns[:-5]
+    names_flb = [name + '_flb' for name in feature_names]
+    names_acb = [name + '_acb' for name in feature_names]
+    names_tbv = [name + '_tbv' for name in feature_names]
+    names_flb2 = [name + '_flb2' for name in feature_names]
+    names_flma = [name + '_flma' for name in feature_names]
+
+    columns = ['initial_accuracy', 'final_accuracy']
+    columns = columns + names_acb + names_flb + names_flb2 + names_flma + names_tbv
+    columns = columns + ['acb_r2', 'flb_r2', 'flb2_r2', 'flma_r2', 'tbv_r2']
+
     for g in genealogies:
-        print('Current genealogy: {}'.format(g))
         if int(end_index) < int(g) or int(g) < int(start_index):
             continue
         else:
+            print('Current genealogy: {}'.format(g))
             g_path = input_path + '/' + g
+            g_start = time.time()
             for N in os.listdir(g_path):
+                N_start = time.time()
                 if 'train_test_' not in N or 'caffemodel' in N or 'solverstate' in N:
                     continue
                 else:
@@ -114,161 +153,94 @@ if __name__ == '__main__':
                         continue
                     net_path = g_path + '/' + N
                     net = Network(net_path, mode=mode)
-                    attributes = []
-                    columns = []
-                    attributes.append(accuracy[0])
-                    columns.append('initial_accuracy')
-                    attributes.append(accuracy[1])
-                    columns.append('final_accuracy')
+                    attributes = accuracy
+
+                    ipLayers = net.inputLayers
+                    inputs = [(net, l) for l in ipLayers]
 
                     df = pd.DataFrame()
 
                     for i in range(num_training_imgs):
+                        img_start = time.time()
                         net.feed_image(hdf5=img_file, mode=mode, rimg=True)
-                        for l in net.inputLayers:
-                            net.set_img_alpha_cplx2d(l)
-                            net.set_img_points2d(l)
-                            net.set_min_connected_alpha22d(l)
+                        print('Extracting Image features on image {}...'.format(net.layers['data0_0'].imgFeatures['id']))
+
+                        #for l in ipLayers:
+                        #    net.set_img_alpha_cplx2d(l)
+                        #    net.set_img_points2d(l)
+                        #    net.set_min_connected_alpha22d(l)
+                        points = pool.map(net.get_img_points2d, ipLayers)
+                        for l, p in zip(ipLayers, points):
+                            net.layers[l].imgFeatures['points_2d'] = p
+
                         img_features = []
-                        img_columns = []
 
-                        # GET IMAGE FEATURES
+                        paths = pool.map(get_max_paths, inputs)
 
-                        # nonzero_activations
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.nonzero_activations(l))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('nonzero_activations')
+                        nonzero_activations = pool.map(net.nonzero_activations, ipLayers)
+                        horiz_spread = pool.map(net.horiz_spread, ipLayers)
+                        vert_spread = pool.map(net.vert_spread, ipLayers)
+                        horiz_sd = pool.map(net.horiz_sd, ipLayers)
+                        vert_sd = pool.map(net.vert_sd, ipLayers)
 
-                        # horiz_spread
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.horiz_spread(l))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('horiz_spread')
+                        for l in ipLayers:
+                            net.set_img_alpha_cplx2d(l)
+                            net.set_min_connected_alpha22d(l)
 
-                        # vert_spread
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.vert_spread(l))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('vert_spread')
+                        min_alpha2 = [net.layers[l].imgFeatures['min_connected_alpha22d'] for l in ipLayers]
+                        betti_nums = [net.get_betti_numbers(l) for l in ipLayers]
+                        num_persistent_components = [net.get_num_persistent_components(l) for l in ipLayers]
+                        num_persistent_holes = [net.get_num_persistent_holes(l) for l in ipLayers]
+                        num_delaunay_edges = [net.get_delaunay_edges(l) for l in ipLayers]
+                        num_min_alpha_edges = [net.get_alpha_edges(l) for l in ipLayers]
+                        inter_layer_bottleneck_avg = net.inter_layer_bottleneck_avg()
 
-                        # horiz_sd
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.horiz_sd(l))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('horiz_sd')
+                        scores_bottleneck = [net.bottleneck_scores(p) for p in itertools.chain.from_iterable(paths)]
+                        scores_first_layer = [net.first_layer_scores(l) for l in ipLayers]
 
-                        # vert_sd
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.vert_sd(l))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('vert_sd')
+                        scores1 = [s[0] for s in scores_bottleneck]
+                        scores2 = [s[1] for s in scores_bottleneck]
+                        scores3 = [s[2] for s in scores_bottleneck]
+                        scores4 = [s[0] for s in scores_first_layer]
+                        scores5 = [s[1] for s in scores_first_layer]
 
-                        # min_alpha2
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.layers[l].imgFeatures['min_connected_alpha22d'])
-                        img_features.append(np.mean(feature))
-                        img_columns.append('min_alpha2')
-
-                        # min_alpha2_betti_0 and min_alpha2_betti_1
-
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.get_betti_numbers(l))
-                        img_features.append(np.mean([f[0] for f in feature]))
-                        img_features.append(np.mean([f[1] for f in feature]))
-                        img_columns.append('min_alpha2_betti_0')
-                        img_columns.append('min_alpha2_betti_1')
-
-                        # num_persistent_components
-
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.get_num_persistent_components(l, pers_scaler=0.25))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('num_persistent_components')
-
-                        # num_persistent_holes
-
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.get_num_persistent_holes(l, pers_scaler=0.25))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('num_persistent_holes')
-
-                        # num_delaunay_edges
-
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.get_delaunay_edges(l))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('num_delaunay_edges')
-
-                        # num_min_alpha_edges
-
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.get_alpha_edges(l))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('num_min_alpha_edges')
-
-                        # min_alpha_ec
-
-                        feature = []
-                        for l in net.inputLayers:
-                            feature.append(net.get_EC(l))
-                        img_features.append(np.mean(feature))
-                        img_columns.append('min_alpha_ec')
-
-                        # inter_layer_bottleneck_avg
-
-                        img_features.append(net.inter_layer_bottleneck_avg())
-                        img_columns.append('inter_layer_bottleneck_avg')
-
-                        # NOW GET IMAGE SCORES
-
-                        scores1 = []
-                        scores2 = []
-                        scores3 = []
-                        scores4 = []
-                        scores5 = []
-
-                        for l in net.inputLayers:
-                            max_paths = net.get_max_paths(l, convOnly=False, phases=['ALL', 'TEST'], include_pooling=True)
-                            unique_paths = []
-                            for p in max_paths:
-                                if p[:-1] not in unique_paths:
-                                    unique_paths.append(p[:-1])
-                            for p in unique_paths:
-                                scores1.append(net.first_last_bottleneck(p))
-                                scores2.append(net.avg_consecutive_bottleneck(p))
-                                scores3.append(net.total_bottleneck_variation(p))
-                            scores4.append(net.first_layer_bottleneck(l))
-                            scores5.append(net.first_layer_min_alpha2(l))
-
+                        img_features.append(np.mean(nonzero_activations))
+                        img_features.append(np.mean(horiz_spread))
+                        img_features.append(np.mean(vert_spread))
+                        img_features.append(np.mean(horiz_sd))
+                        img_features.append(np.mean(vert_sd))
+                        img_features.append(np.mean(min_alpha2))
+                        img_features.append(np.mean([p[0] for p in betti_nums]))
+                        if len(betti_nums[0]) < 2:
+                            img_features.append(0)
+                        else:
+                            img_features.append(np.mean([p[1] for p in betti_nums]))
+                        img_features.append(np.mean(num_persistent_components))
+                        img_features.append(np.mean(num_persistent_holes))
+                        img_features.append(np.mean(num_delaunay_edges))
+                        img_features.append(np.mean(num_min_alpha_edges))
+                        img_features.append(np.mean(inter_layer_bottleneck_avg))
                         img_features = img_features + [np.mean(scores1),
                                                        np.mean(scores2),
                                                        np.mean(scores3),
                                                        np.mean(scores4),
                                                        np.mean(scores5)]
-                        img_columns = img_columns + ['first_last_bottleneck',
-                                                     'avg_consecutive_bottleneck',
-                                                     'total_bottleneck_variation',
-                                                     'first_layer_bottleneck',
-                                                     'first_layer_min_alpha2']
+
+                        if sum([np.isnan(f) for f in img_features]) > 0:
+                            print('Found NaN value. Skipping...')
+                            net.reset_img_features()
+                            continue
+
                         new_img = pd.DataFrame.from_dict({net.layers['data0_0'].imgFeatures['id']: img_features},
                                                          orient='index',
                                                          columns=img_columns)
-                        df.append(new_img)
+                        df = df.append(new_img)
+                        print('Image time: {}s'.format(time.time()-img_start))
+                        img_times.append(time.time()-img_start)
+                        net.reset_img_features()
 
-                    # Train regression models on each score and add row to overall dataframe.
-                    feature_names = img_columns[:-5]
+                    # Train regression models on each score and add row to overall dataframe. Can also try other models.
+
                     X = df.iloc[:, :-5]
                     flb = df.iloc[:, -5:-4]
                     acb = df.iloc[:, -4:-3]
@@ -277,37 +249,41 @@ if __name__ == '__main__':
                     flma = df.iloc[:, -1:]
                     LR = LinearRegression(True, True, True, -1)
                     LR.fit(X, flb)
-                    weights_flb = LR.coef_
-                    names_flb = [name + '_flb' for name in feature_names]
+                    weights_flb = list(LR.coef_[0, :])
+
                     flb_r2 = LR.score(X, flb)
                     LR.fit(X, acb)
-                    weights_acb = LR.coef_
-                    names_acb = [name + '_acb' for name in feature_names]
+                    weights_acb = list(LR.coef_[0, :])
+
                     acb_r2 = LR.score(X, acb)
                     LR.fit(X, tbv)
-                    weights_tbv = LR.coef_
-                    names_tbv = [name + '_tbv' for name in feature_names]
+                    weights_tbv = list(LR.coef_[0, :])
+
                     tbv_r2 = LR.score(X, tbv)
                     LR.fit(X, flb2)
-                    weights_flb2 = LR.coef_
-                    names_flb2 = [name + '_flb2' for name in feature_names]
+                    weights_flb2 = list(LR.coef_[0, :])
+
                     flb2_r2 = LR.score(X, flb2)
                     LR.fit(X, flma)
-                    weights_flma = LR.coef_
-                    names_flma = [name + '_flma' for name in feature_names]
-                    flma_r2 = LR.fit(X, flma)
+                    weights_flma = list(LR.coef_[0, :])
 
-                    attributes = weights_acb + weights_flb + weights_flb2 + weights_flma + weights_tbv
+                    flma_r2 = LR.score(X, flma)
+
+                    attributes = attributes + weights_acb + weights_flb + weights_flb2 + weights_flma + weights_tbv
                     attributes = attributes + [acb_r2, flb_r2, flb2_r2, flma_r2, tbv_r2]
-                    names = names_acb + names_flb + names_flb2 + names_flma + names_tbv
-                    names = names + ['acb_r2', 'flb_r2', 'flb2_r2', 'flma_r2', 'tbv_r2']
+                    print('Appending a row with {} new attributes.'.format(len(attributes)))
 
-                    new_row = pd.DataFrame.from_dict({net_id: attributes}, orient='index', columns=names)
-                    df_complex.append(new_row)
+                    new_row = pd.DataFrame.from_dict({net_id: attributes}, orient='index', columns=columns)
+                    df_complex = df_complex.append(new_row)
+                    print("Network time: {}s.".format(time.time()-N_start))
+                    N_times.append(time.time()-N_start)
+            print("Genealogy time: {}s.".format(time.time()-g_start))
+            g_times.append(time.time()-g_start)
 
     output_name = output_path + '/' + mode + '-complex-' + start_index + '-' + end_index + '.csv'
     df_complex.to_csv(output_name)
     print('Number of missing/corrupted output files: {}'.format(missing_op))
-    print('Total time elapsed: {} s'.format(time.time() - start_time))
-
-
+    print('Average image time: {}s.'.format(np.mean(img_times)))
+    print('Average network time: {}s.'.format(np.mean(N_times)))
+    print('Average genealogy time: {}s.'.format(np.mean(g_times)))
+    print('Total time elapsed: {}s.'.format(time.time() - start_time))
