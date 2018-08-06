@@ -11,12 +11,12 @@ echo "Job ${PBS_JOBNAME} submitted from ${PBS_O_HOST} started "`date`" jobid ${P
 
 cd /home/jhamer
 
-INPUT_PATH=$1
-OUTPUT_PATH=$2
-IMG_PATH=$3
-START_INDEX=$4
-END_INDEX=$5
-MODE=$6
+INPUT_PATH='/data/jhamer/minerva_networks/networks'
+OUTPUT_PATH='/data/jhamer/minerva_output/complex_attributes'
+IMG_PATH='/data/jhamer/minerva_imgs/hadmultkineimgs_127x94_me1Amc.hdf5'
+START_INDEX=51
+END_INDEX=92
+MODE='minerva'
 
 singularity exec network_topology.simg python3 MINERvA_NOvA_network_analysis/get_complex_attributes.py ${INPUT_PATH} ${OUTPUT_PATH} ${IMG_PATH} ${START_INDEX} ${END_INDEX} ${MODE}
 
