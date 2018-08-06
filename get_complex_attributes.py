@@ -211,10 +211,7 @@ if __name__ == '__main__':
                         img_features.append(np.mean(vert_sd))
                         img_features.append(np.mean(min_alpha2))
                         img_features.append(np.mean([p[0] for p in betti_nums]))
-                        if len(betti_nums[0]) < 2:
-                            img_features.append(0)
-                        else:
-                            img_features.append(np.mean([p[1] for p in betti_nums]))
+                        img_features.append(np.mean([p[1] if len(p) > 1 else 0 for p in betti_nums]))
                         img_features.append(np.mean(num_persistent_components))
                         img_features.append(np.mean(num_persistent_holes))
                         img_features.append(np.mean(num_delaunay_edges))
