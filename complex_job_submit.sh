@@ -11,12 +11,13 @@ echo "Job ${PBS_JOBNAME} submitted from ${PBS_O_HOST} started "`date`" jobid ${P
 
 cd /home/jhamer
 
-export INPUT_PATH=$1
-export OUTPUT_PATH=$2
-export START_INDEX=$3
-export END_INDEX=$4
-export MODE=$5
+INPUT_PATH=$1
+OUTPUT_PATH=$2
+IMG_PATH=$3
+START_INDEX=$4
+END_INDEX=$5
+MODE=$6
 
-singularity exec network_topology.simg python3 MINERvA_NOvA_network_analysis/get_complex_attributes.py ${INPUT_PATH} ${OUTPUT_PATH} ${START_INDEX} ${END_INDEX} ${MODE}
+singularity exec network_topology.simg python3 MINERvA_NOvA_network_analysis/get_complex_attributes.py ${INPUT_PATH} ${OUTPUT_PATH} ${IMG_PATH} ${START_INDEX} ${END_INDEX} ${MODE}
 
 exit
