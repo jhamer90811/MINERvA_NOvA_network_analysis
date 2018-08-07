@@ -232,7 +232,6 @@ if __name__ == '__main__':
                                                          orient='index',
                                                          columns=img_columns)
                         df = df.append(new_img)
-                        print('Image time: {}s'.format(time.time()-img_start))
                         img_times.append(time.time()-img_start)
                         net.reset_img_features()
 
@@ -268,11 +267,9 @@ if __name__ == '__main__':
 
                     attributes = attributes + weights_acb + weights_flb + weights_flb2 + weights_flma + weights_tbv
                     attributes = attributes + [acb_r2, flb_r2, flb2_r2, flma_r2, tbv_r2]
-                    print('Appending a row with {} new attributes.'.format(len(attributes)))
 
                     new_row = pd.DataFrame.from_dict({net_id: attributes}, orient='index', columns=columns)
                     df_complex = df_complex.append(new_row)
-                    print("Network time: {}s.".format(time.time()-N_start))
                     N_times.append(time.time()-N_start)
             print("Genealogy time: {}s.".format(time.time()-g_start))
             g_times.append(time.time()-g_start)
