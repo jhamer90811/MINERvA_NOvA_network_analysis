@@ -3658,7 +3658,9 @@ class Network:
 
         pers = self.layers[inputLayer].imgFeatures['alpha_complex2dPers']
         zero_pers = [p[1] for p in pers if p[0] == 0]
-        min_connected_alpha2 = max([p[1] for p in zero_pers if p[1] < float('Inf')]) + 0.25
+        if not zero_pers:
+            return 0
+        min_connected_alpha2 = max([p[1] if p[1] < float('Inf') else 0 for p in zero_pers ]) + 0.25
 
         return min_connected_alpha2
 
