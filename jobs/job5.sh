@@ -11,7 +11,7 @@ echo "Job ${PBS_JOBNAME} submitted from ${PBS_O_HOST} started "`date`" jobid ${P
 
 cd /home/jhamer
 
-INPUT_PATH=/data/jhamer/minerva_networks_networks
+INPUT_PATH=/data/jhamer/minerva_networks/networks
 OUTPUT_PATH=/data/jhamer/minerva_output/complex_attributes
 IMG_PATH=/lfstev/e-938/jhamer/05/hadmultkineimgs_127x94_me1Amc.hdf5
 START_INDEX=2180
