@@ -18,6 +18,6 @@ START_INDEX=2315
 END_INDEX=2360
 MODE='minerva'
 
-singularity exec network_topology.simg python3 MINERvA_NOvA_network_analysis/get_complex_attributes.py ${INPUT_PATH} ${OUTPUT_PATH} ${IMG_PATH} ${START_INDEX} ${END_INDEX} ${MODE}
+singularity exec -B /lfstev:/lfstev network_topology.simg python3 MINERvA_NOvA_network_analysis/get_complex_attributes.py ${INPUT_PATH} ${OUTPUT_PATH} ${IMG_PATH} ${START_INDEX} ${END_INDEX} ${MODE}
 
 exit
