@@ -107,7 +107,7 @@ if __name__ == '__main__':
     N_times = []
     img_times = []
     output_name = output_path + '/' + mode + '-complex-' + start_index + '-' + end_index + '.csv'
-    pool = Pool(2)
+    pool = Pool()
 
     img_columns = ['nonzero_activations', 'horiz_spread', 'vert_spread', 'horiz_sd', 'vert_sd', 'min_alpha2',
                    'min_alpha2_betti_0', 'min_alpha2_betti_1', 'num_persistent_components', 'num_persistent_holes',
