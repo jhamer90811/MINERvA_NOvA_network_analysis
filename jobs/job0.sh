@@ -14,8 +14,8 @@ cd /home/jhamer
 INPUT_PATH=/data/jhamer/minerva_networks/networks
 OUTPUT_PATH=/data/jhamer/minerva_output/complex_attributes
 IMG_PATH=/data/jhamer/minerva_imgs/hadmultkineimgs_127x94_me1Amc.hdf5
-START_INDEX=51
-END_INDEX=96
+START_INDEX=3990
+END_INDEX=4035
 MODE='minerva'
 
 singularity exec network_topology.simg python3 MINERvA_NOvA_network_analysis/get_complex_attributes.py ${INPUT_PATH} ${OUTPUT_PATH} ${IMG_PATH} ${START_INDEX} ${END_INDEX} ${MODE}

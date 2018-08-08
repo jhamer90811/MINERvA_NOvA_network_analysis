@@ -14,8 +14,8 @@ cd /home/jhamer
 INPUT_PATH=/data/jhamer/minerva_networks/networks
 OUTPUT_PATH=/data/jhamer/minerva_output/complex_attributes
 IMG_PATH=/lfstev/e-938/jhamer/20/hadmultkineimgs_127x94_me1Amc.hdf5
-START_INDEX=2855
-END_INDEX=2900
+START_INDEX=3855
+END_INDEX=3900
 MODE='minerva'
 
 singularity exec -B /lfstev:/lfstev network_topology.simg python3 MINERvA_NOvA_network_analysis/get_complex_attributes.py ${INPUT_PATH} ${OUTPUT_PATH} ${IMG_PATH} ${START_INDEX} ${END_INDEX} ${MODE}
