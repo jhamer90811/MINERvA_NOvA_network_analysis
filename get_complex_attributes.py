@@ -106,7 +106,8 @@ if __name__ == '__main__':
     g_times = []
     N_times = []
     img_times = []
-    pool = Pool()
+    output_name = output_path + '/' + mode + '-complex-' + start_index + '-' + end_index + '.csv'
+    pool = Pool(2)
 
     img_columns = ['nonzero_activations', 'horiz_spread', 'vert_spread', 'horiz_sd', 'vert_sd', 'min_alpha2',
                    'min_alpha2_betti_0', 'min_alpha2_betti_1', 'num_persistent_components', 'num_persistent_holes',
@@ -137,7 +138,6 @@ if __name__ == '__main__':
                     continue
                 else:
                     net_id = N[11:-9]
-                    print('Working on {}...'.format(net_id))
                     if 'output_' + net_id + '.txt_test.txt' not in os.listdir(g_path) and mode == 'minerva':
                         print('Output file not found for {}. Skipping.'.format(net_id))
                         missing_op += 1
@@ -163,8 +163,6 @@ if __name__ == '__main__':
                     for i in range(num_training_imgs):
                         img_start = time.time()
                         net.feed_image(hdf5=img_file, mode=mode, rimg=True)
-                        print('Extracting Image features on image {}...'.format(net.layers['data0_0'].imgFeatures['id']))
-
                         #for l in ipLayers:
                         #    net.set_img_alpha_cplx2d(l)
                         #    net.set_img_points2d(l)
@@ -273,9 +271,8 @@ if __name__ == '__main__':
                     N_times.append(time.time()-N_start)
             print("Genealogy time: {}s.".format(time.time()-g_start))
             g_times.append(time.time()-g_start)
+            df_complex.to_csv(output_name)
 
-    output_name = output_path + '/' + mode + '-complex-' + start_index + '-' + end_index + '.csv'
-    df_complex.to_csv(output_name)
     print('Number of missing/corrupted output files: {}'.format(missing_op))
     print('Average image time: {}s.'.format(np.mean(img_times)))
     print('Average network time: {}s.'.format(np.mean(N_times)))
