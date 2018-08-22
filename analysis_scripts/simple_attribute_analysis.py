@@ -21,7 +21,76 @@ import sklearn.metrics as metrics
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
 
-# Load data
+# Brief analysis of raw data
+
+data = pd.read_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/MINERvA_NOvA_network_analysis/minerva-simple-00001-05000.csv', index_col = 0)
+# Drop any rows with NaNs:
+data = data.dropna()
+data_means = data.mean()
+data_stds = data.std()
+
+# Note attributes with 0 std:
+
+print(data_stds.where(data_stds == 0.0).dropna().to_string())
+# Drop these, along with avg_concat_width and avg_split_width, which have essentially 0 variance
+data = data.drop(columns=list(data_stds.where(data_stds == 0.0).dropna().index))
+
+# Get histograms:
+data_mins = data.min(0)
+data_maxs = data.max(0)
+
+for col in data.drop(columns=['genealogy','avg_concat_width', 'avg_split_width'])).columns:
+    hist, bins = np.histogram(data[col], bins=50)
+    plt.bar(bins[:-1], hist.astype(np.float32) / hist.sum(), width=(bins[1]-bins[0]), color='blue')
+    x = np.linspace(data_mins.loc[col], data_maxs.loc[col], 10000)
+    y = mlab.normpdf(x, data_means.loc[col], data_stds.loc[col])
+    plt.plot(x, y, 'k--')
+    plt.title('Histogram of {}'.format(col))
+    # plt.axvline(data_means.loc[col], color='r', linewidth=1)
+    plt.show()
+
+# Get correlations:
+data_corr = data.corr()
+# Which variables are correlated at > 0.5?
+print(data_corr.where(abs(data_corr) > 0.5).to_string())
+# Drop any min_ or max_ prefaced attributes in favor of their avg_ counterparts. The avg_ attributes
+# seem to have the most normal histograms, and the three tend to be highly correlated.
+
+data = data.drop(columns = [c for c in data.columns if 'max' in c or 'min' in c])
+
+# "num_conv_features" and "num_conv_features.1" were misnamed--these should be max_conv_features and
+# min_conv_features, and accordingly will be dropped. Moreover, avg_conv_ker_area is actually avg_num_
+# conv_features due to an error in the data collection code (see get_simple_attribues.py). Thus this
+# will also be dropped.
+
+data = data.drop(columns = ['num_conv_features', 'num_conv_features.1', 'avg_conv_ker_area'])
+
+# This leaves 32 regressors altogether.
+
+data.to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_simple_all_acc_32_feat.csv')
+
+#Normalize (to standard normal scale)
+
+data_means = data.mean()
+data_means.loc['final_accuracy', 'genealogy'] = 0
+data_stds = data.std()
+data_stds.loc['final_accuracy', 'genealogy'] = 1
+
+data_normed = (data-data_means)/data_stds
+
+data_normed.to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_simple_all_acc_32_feat_normed.csv')
+
+
+# Examine correlations.
+data_corr = data.corr()
+print(data_corr.where(abs(data_corr)>0.5).to_string())
+
+# Drop all terms besides net_depth_avg, avg_IP_weights, prop_conv_into_pool, prop_horiz_kernels,
+# avg_grid_reduction_width_total, avg_ratio_features_to_depth, avg_ratio_features_to_kerWidth,
+# avg_ratio_features_to_kerHeight, avg_ratio_kerWidth_to_depth, avg_ratio_kerHeight_to_depth, genealogy,
+# final_accuracy
+
+# Load data w/ only 10 attributes
 
 all_data = pd.read_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_simple_all.csv', index_col=0)
 data_corr = pd.read_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_simple_corr.csv', index_col=0)
@@ -133,7 +202,9 @@ norm_pca_data = norm_pca_data.join(high_acc_normed.loc[:, 'genealogy':])
 
 # %%
 
-# General code with variable accuracy tolerance:
+# General code with variable accuracy tolerance.
+
+# How does model fit behave when we remove low-accuracy networks?
 
 def get_high_acc_data(tol=0, save_data = False):
     """
@@ -191,6 +262,7 @@ for tol in np.linspace(0.0, 0.1, 21):
     get_high_acc_data(tol)
 
 # %%
+# Best accuracy cutoff is 0.054
 
 tol = 0.054
 all_data = pd.read_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_simple_all.csv', index_col=0)
@@ -238,6 +310,7 @@ norm_pca_data = norm_pca_data.join(high_acc_normed.loc[:, 'genealogy':])
 
 norm_pca_data.to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_simple_{}_pca.csv'.format(tol))
 
+# Plot histograms of attributes for accuracy > 0.054
 
 for col in high_acc_data.drop(columns=['genealogy']).columns:
     hist, bins = np.histogram(high_acc_data[col], bins=50)
@@ -252,6 +325,8 @@ for col in high_acc_data.drop(columns=['genealogy']).columns:
 # %%
 
 # Looking at most parsimonious quadratic model. (R^2 = 0.3862)
+# This model allows all 32 attributes obtained in the introductory analysis. As such, there will be
+# considerable multicollinearity.
 
 lin_terms = ['avg_ratio_features_to_kerWidth','avg_grid_reduction_width_total','avg_grid_reduction_height_total','avg_ratio_kerWidth_to_depth','avg_num_conv_features','avg_grid_reduction_width_consecutive','num_relu','avg_ratio_features_to_depth','prop_vert_kernels','avg_ratio_kerArea_to_depth','avg_ratio_features_to_kerHeight','prop_1x1_conv','num_pooling_layers']
 int_terms = ['avg_grid_reduction_width_total:avg_ratio_kerWidth_to_depth','avg_ratio_kerWidth_to_depth:avg_grid_reduction_width_consecutive','num_relu:avg_ratio_features_to_kerHeight','avg_ratio_features_to_kerWidth:num_relu','avg_stride_h:avg_ratio_kerHeight_to_depth','avg_ratio_features_to_kerWidth:avg_ratio_features_to_kerHeight','avg_grid_reduction_width_consecutive:prop_vert_kernels','avg_ratio_kerWidth_to_depth:num_conv_layers','prop_1x1_conv:prop_square_kernels','num_conv_layers:avg_stride_w','avg_ratio_features_to_kerWidth:prop_vert_kernels','net_depth_avg:avg_IP_neurons','avg_ratio_features_to_kerWidth:avg_ratio_features_to_kerArea','num_pooling_layers:avg_IP_neurons','num_conv_layers:avg_IP_neurons','avg_grid_reduction_width_consecutive:avg_ratio_kerArea_to_depth','avg_grid_reduction_width_consecutive:avg_grid_reduction_area_consecutive','avg_ratio_features_to_depth:avg_stride_w','avg_ratio_features_to_kerWidth:avg_ratio_kerWidth_to_depth','avg_ratio_features_to_kerWidth:avg_grid_reduction_width_total','avg_ratio_features_to_kerWidth:avg_stride_h','avg_num_conv_features:num_relu','prop_square_kernels:avg_ratio_features_to_kerArea','avg_num_conv_features:avg_stride_w','num_relu:avg_IP_neurons','avg_num_conv_features:avg_grid_reduction_width_consecutive','avg_ratio_features_to_depth:num_sigmoid','avg_ratio_kerArea_to_depth:num_conv_layers','num_relu:avg_ratio_features_to_kerArea','num_conv_layers:prop_conv_into_pool','avg_ratio_features_to_kerHeight:avg_grid_reduction_area_consecutive','avg_grid_reduction_area_consecutive:avg_grid_reduction_height_consecutive','avg_stride_w:avg_IP_neurons','avg_grid_reduction_width_total:avg_grid_reduction_width_consecutive','avg_ratio_features_to_kerHeight:avg_grid_reduction_height_consecutive','num_relu:prop_conv_into_pool','avg_ratio_kerWidth_to_depth:avg_IP_neurons','avg_ratio_features_to_kerHeight:prop_pool_into_pool','prop_vert_kernels:prop_horiz_kernels','avg_grid_reduction_area_consecutive:prop_horiz_kernels','num_relu:avg_stride_h']
@@ -375,7 +450,7 @@ print('Mean Shift predicts {} labels.'.format(max(meanshift.labels_)+1))
 
 print('Mean Shift Silhouette: {}; Mean Shift Calinski-Harabaz: {}'.format(metrics.silhouette_score(data_quad_pca_X, meanshift_labels_pred, sample_size=100),
                                                                           metrics.calinski_harabaz_score(data_quad_pca_X, meanshift_labels_pred)))
-
+# Plot clusters and raw PCA data.
 x = data_quad_pca_X[:, 0]
 y = data_quad_pca_X[:, 1]
 z = data_quad_pca_X[:, 2]
@@ -720,6 +795,7 @@ ax.set_xlabel('Distance^2 from Centroid')
 ax.set_ylabel('log(accuracy + 1)')
 plt.show()
 
+# Try to determine a relationship between accuracy and distance from nearest cluster center.
 kmeans = KMeans(2)
 kmeans.fit(data_quad_pca_X)
 
@@ -817,6 +893,7 @@ for i in reversed(range(num_bins)):
     ax.text2D(0.05, 0.95, 'First 3 Principal Components; {} <= log(accuracy+1) <= {}; Number of Networks = {}'.format(np.round(acc, 4), np.round(max_acc, 4), num_points), transform=ax.transAxes)
     plt.show()
 
+# Redo, but only measure distance from the first (largest) cluster.
 cluster_dist = [np.linalg.norm(p-clusters[0]) for p in [data_quad_pca_X[i, :] for i in range(data_quad_pca_X.shape[0])]]
 cluster_dist = np.array(cluster_dist)
 
@@ -866,46 +943,5 @@ stds = [np.std([np.linalg.norm(p-clusters[0]) for p in pt]) for pt in pts]
 for i, s in enumerate(stds):
     print('Dispersion for bin {} is {}.'.format(i, s))
 
-# Translate the cluster center and PCs back into the original coordinates.
-
-regressors = list(data_quad_X.columns)
-principal_components = [[(r, np.round(c, 4)) for r, c in zip(regressors, pc)] for pc in pca.components_]
-
-cluster_pt_normed = pca.inverse_transform(clusters[0])
-cluster_pt_normed = [(r, np.round(c,4)) for r,c in zip(regressors, cluster_pt_normed)]
-
-lin_terms = ['avg_ratio_features_to_kerWidth','avg_grid_reduction_width_total','avg_grid_reduction_height_total','avg_ratio_kerWidth_to_depth','avg_num_conv_features','avg_grid_reduction_width_consecutive','num_relu','avg_ratio_features_to_depth','prop_vert_kernels','avg_ratio_kerArea_to_depth','avg_ratio_features_to_kerHeight','prop_1x1_conv','num_pooling_layers']
-int_terms = ['avg_grid_reduction_width_total:avg_ratio_kerWidth_to_depth','avg_ratio_kerWidth_to_depth:avg_grid_reduction_width_consecutive','num_relu:avg_ratio_features_to_kerHeight','avg_ratio_features_to_kerWidth:num_relu','avg_stride_h:avg_ratio_kerHeight_to_depth','avg_ratio_features_to_kerWidth:avg_ratio_features_to_kerHeight','avg_grid_reduction_width_consecutive:prop_vert_kernels','avg_ratio_kerWidth_to_depth:num_conv_layers','prop_1x1_conv:prop_square_kernels','num_conv_layers:avg_stride_w','avg_ratio_features_to_kerWidth:prop_vert_kernels','net_depth_avg:avg_IP_neurons','avg_ratio_features_to_kerWidth:avg_ratio_features_to_kerArea','num_pooling_layers:avg_IP_neurons','num_conv_layers:avg_IP_neurons','avg_grid_reduction_width_consecutive:avg_ratio_kerArea_to_depth','avg_grid_reduction_width_consecutive:avg_grid_reduction_area_consecutive','avg_ratio_features_to_depth:avg_stride_w','avg_ratio_features_to_kerWidth:avg_ratio_kerWidth_to_depth','avg_ratio_features_to_kerWidth:avg_grid_reduction_width_total','avg_ratio_features_to_kerWidth:avg_stride_h','avg_num_conv_features:num_relu','prop_square_kernels:avg_ratio_features_to_kerArea','avg_num_conv_features:avg_stride_w','num_relu:avg_IP_neurons','avg_num_conv_features:avg_grid_reduction_width_consecutive','avg_ratio_features_to_depth:num_sigmoid','avg_ratio_kerArea_to_depth:num_conv_layers','num_relu:avg_ratio_features_to_kerArea','num_conv_layers:prop_conv_into_pool','avg_ratio_features_to_kerHeight:avg_grid_reduction_area_consecutive','avg_grid_reduction_area_consecutive:avg_grid_reduction_height_consecutive','avg_stride_w:avg_IP_neurons','avg_grid_reduction_width_total:avg_grid_reduction_width_consecutive','avg_ratio_features_to_kerHeight:avg_grid_reduction_height_consecutive','num_relu:prop_conv_into_pool','avg_ratio_kerWidth_to_depth:avg_IP_neurons','avg_ratio_features_to_kerHeight:prop_pool_into_pool','prop_vert_kernels:prop_horiz_kernels','avg_grid_reduction_area_consecutive:prop_horiz_kernels','num_relu:avg_stride_h']
-int_terms = [(t[:t.find(':')], t[t.find(':')+1:]) for t in int_terms]
-data = pd.read_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_simple_0.054_all_features.csv', index_col=0)
-data_orig = data.loc[:, lin_terms]
-data_means = data.mean()
-data_stds = data.std()
-
-for t in int_terms:
-    name = '{}:{}'.format(t[0], t[1])
-    s = data_quad_X[name]*data_stds[t[0]]*data_stds[t[1]] + data_means[t[1]]*data[t[0]] + data_means[t[0]]*data[t[1]] + data_means[t[0]]*data_means[t[1]]
-    s.name = name
-    data_orig = data_orig.join(s)
-
-principal_components_orig = []
-
-for pc in principal_components:
-    comp_orig = []
-    for t, x in pc:
-        if ':' in t:
-            pass
-        else:
-            comp_orig.append((t, x*data_stds[t] + data_means[t]))
-    principal_components_orig.append(comp_orig)
-
-cluster_center_orig = []
-for t,x in cluster_pt_normed:
-    if ':' in t:
-        pass
-    else:
-        cluster_center_orig.append((t, x * data_stds[t] + data_means[t]))
-
-print(cluster_center_orig)
 
 

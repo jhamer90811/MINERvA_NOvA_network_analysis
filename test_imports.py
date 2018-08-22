@@ -63,7 +63,4 @@ try:
 except:
     print('Failed to load caffe_pb2')
 
-print('The arguments you passed were: ')
-for arg in sys.argv[1:]:
-    print(arg)
 

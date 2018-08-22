@@ -103,9 +103,19 @@ std_tbv['final_accuracy'] = 1
 normed_tbv = (data_tbv-mean_tbv)/std_tbv
 normed_tbv.to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_complex_tbv_normed.csv')
 
+# Get high-accuracy datasets w/ all attributes
+
+tol = 0.055
+normed_all.where(normed_all['final_accuracy']>tol).dropna().to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_complex_0.055_all_normed.csv')
+normed_acb.where(normed_acb['final_accuracy']>tol).dropna().to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_complex_0.055_acb_normed.csv')
+normed_flb.where(normed_flb['final_accuracy']>tol).dropna().to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_complex_0.055_flb_normed.csv')
+normed_flb2.where(normed_flb2['final_accuracy']>tol).dropna().to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_complex_0.055_flb2_normed.csv')
+normed_flma.where(normed_flma['final_accuracy']>tol).dropna().to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_complex_0.055_flma_normed.csv')
+normed_tbv.where(normed_tbv['final_accuracy']>tol).dropna().to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_complex_0.055_tbv_normed.csv')
+
 data_mins = data.min()
 data_maxs = data.max()
-
+# Histograms of complex attributes.
 for col in data.columns[1:]:
     hist, bins = np.histogram(data[col], bins=50)
     plt.bar(bins[:-1], hist.astype(np.float32) / hist.sum(), width=(bins[1]-bins[0]), color='blue')
@@ -116,6 +126,7 @@ for col in data.columns[1:]:
     # plt.axvline(data_means.loc[col], color='r', linewidth=1)
     plt.show()
 
+# Correlations
 all_corr = normed_all.corr()
 
 acb_corr = normed_acb.corr()
@@ -196,6 +207,7 @@ high_acc_normed = new_data_normed.where(new_data_normed['final_accuracy'] > 0.05
 high_acc.to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_complex_{}_parsimonious.csv'.format(0.055))
 high_acc_normed.to_csv('/Users/jhamer90811/PycharmProjects/MINERvA_NOvA_network_analysis/pandas_dataframes/minerva_complex_{}_normed_parsimonious.csv'.format(tol))
 
+# Plot principal components to look for patterns.
 pca_2 = PCA(2)
 pca_3 = PCA(3)
 
@@ -435,3 +447,5 @@ s = ax.scatter(x, y, c=percep_predicted)
 plt.colorbar(s)
 
 plt.show()
+
+# Nothing very interesting...
