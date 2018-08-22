@@ -22,9 +22,9 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
 # from pathos.multiprocessing import ProcessingPool as Pool
 
 # Include one of the following; depends on current working directory
-# from MINERvA_NOvA_network_analysis import caffe_pb2
+# from MINERvA_NOvA_network_analysis.caffe_files import caffe_pb2
 
-import caffe_pb2
+from .caffe_files import caffe_pb2
 
 
 # %%
