@@ -191,9 +191,6 @@ modifies the original top/bottom lists of relevant layers to account for this.
 [Simple Attribute Datasets](https://www.dropbox.com/sh/mirz9pw0tlp87cq/AADoMgpPyabxeKr_9QRNlgk5a?dl=0)  
 --------------------------
 
-The datasets in this directory are perhaps confusingly named. Here is a brief
-guide to deciphering the conventions used.
-
 * Suffixes _all, _corr, _min_max_normalized, _pca, and _std_normalized utilize
 networks of any accuracy, and only the 10 regressors found in the analysis scripts
 which were uncorrelated to one another.
