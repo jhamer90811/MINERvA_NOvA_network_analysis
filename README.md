@@ -183,3 +183,23 @@ modifies the original top/bottom lists of relevant layers to account for this.
   * [Simple Attributes](https://www.dropbox.com/sh/mirz9pw0tlp87cq/AADoMgpPyabxeKr_9QRNlgk5a?dl=0)
   * [Complex Attributes](https://www.dropbox.com/sh/q6o4xvm2voq7jop/AAAvc9rXj_Ek6DpHbgZQkzwKa?dl=0)
     
+Getting the [Singularity Container](https://www.singularity-hub.org/collections/1333) to Work on the Wilson Cluster
+---------------------------------
+
+Here is the method I employed in order to use my Singularity container on
+Fermilab's Wilson cluster:
+
+1. [Install Singularity](http://singularity.lbl.gov/docs-installation) on your personal machine. 
+
+2. Install the Singularity container on your personal machine via the command
+    
+    "singularity pull --name customname.img shub://jhamer90811/singularity_imgs:ubuntu16.04-network_topology2"
+    
+3. Use [Dropbox Uploader](https://github.com/andreafabrizi/Dropbox-Uploader) in
+order to upload the built Singularity container to a Dropbox folder of your
+choosing
+
+4. Share the Singularity container on Dropbox and copy the created link
+
+5. From your home directory on the Wilson Cluster, use wget + the link created
+by Dropbox (with "dl=0" changed to "dl=1").
