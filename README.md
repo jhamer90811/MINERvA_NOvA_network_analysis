@@ -6,7 +6,9 @@ Introduction
 
 This repository contains Python scripts for the handling of Caffe neural
 networks designed for vertex finding in the MINERvA dataset and also neural
-networks designed for the NOvA prong dataset. 
+networks designed for the NOvA prong dataset. Here is a brief overview of the
+contents of the repository. See the sections below for a more detailed
+description of functionality.
 
 * The network handler is written in
 [Network.py](https://github.com/jhamer90811/MINERvA_NOvA_network_analysis/blob/master/Network.py).
@@ -16,13 +18,16 @@ properly may be found in [test_imports.py](https://github.com/jhamer90811/MINERv
 
 * [test_networks](https://github.com/jhamer90811/MINERvA_NOvA_network_analysis/tree/master/test_networks)
 contains sample networks (as protobuf files) from both the MINERvA vertex finders as well as NOvA
-prong. Pictures of the networks are also included.
+prong networks. Pictures of the networks are also included.
 
 * [caffe_files](https://github.com/jhamer90811/MINERvA_NOvA_network_analysis/tree/master/caffe_files)
 contains the original Caffe network protobuf file, as well as the Python class
 compiled by Google's protobuf software. One minor modification was made to the
 original protobuf file in order to implement the "gradient scaler layer".
 Besides this, the file is the same as can be found on [Caffe's repository](https://github.com/BVLC/caffe).
+It should be noted that these files merely implement networks as protobuf
+messages. For full neural network functionality (like training and prediction),
+the user will need a deeper, more complete install of Caffe.
 
 * Data collection scripts for simple and complex attributes can be found
 in [data_collection_scripts](https://github.com/jhamer90811/MINERvA_NOvA_network_analysis/tree/master/data_collection_scripts).
@@ -182,7 +187,48 @@ modifies the original top/bottom lists of relevant layers to account for this.
  can be found at the following Dropbox locations:
   * [Simple Attributes](https://www.dropbox.com/sh/mirz9pw0tlp87cq/AADoMgpPyabxeKr_9QRNlgk5a?dl=0)
   * [Complex Attributes](https://www.dropbox.com/sh/q6o4xvm2voq7jop/AAAvc9rXj_Ek6DpHbgZQkzwKa?dl=0)
-    
+
+[Simple Attribute Datasets](https://www.dropbox.com/sh/mirz9pw0tlp87cq/AADoMgpPyabxeKr_9QRNlgk5a?dl=0)  
+--------------------------
+
+The datasets in this directory are perhaps confusingly named. Here is a brief
+guide to deciphering the conventions used.
+
+* Suffixes _all, _corr, _min_max_normalized, _pca, and _std_normalized utilize
+networks of any accuracy, and only the 10 regressors found in the analysis scripts
+which were uncorrelated to one another.
+
+* Suffixes with _0.054 indicate that only networks with accuracies > 0.054 are
+included.
+
+* Suffixes with _all_features or _32_feat correspond to datasets which keep
+all 32 of the valid features obtained in the first lines of "simple_attribute_analysis.py".
+
+* Suffixes with _all_acc utilize networks of any accuracy.
+
+* Suffixes with _normed indicate standard-normal normalization of attributes: (x - mean)/std.
+
+[Complex Attribute Datasets](https://www.dropbox.com/sh/q6o4xvm2voq7jop/AAAvc9rXj_Ek6DpHbgZQkzwKa?dl=0)
+----------------------------
+
+* Suffixes _0.055 indicate that only networks with accuracy > 0.055 are included.
+
+* Suffixes with _all indicate that all scores are used for attributes.
+
+* Suffixes with _acb, _flb, _flb2, _flma, or _tbv indicate that only attributes
+corresponding to the indicated score are included.
+
+* Suffixes with _normed indicate standard-normal normalization of attributes: (x-mean)/std.
+
+* Suffixes with _parsimonious indicate that only the 25 attributes mentioned in "complex_attribute_analysis.py"
+are included.
+
+* The suffix with _R2 contains the R^2 data for each individual scoring function. This
+dataset should be ignored without corresponding p-values, which were not collected.
+
+* The suffix with _raw indicates the original dataset of complex attributes, without any
+preprocessing or cleaning.
+
 Getting the [Singularity Container](https://www.singularity-hub.org/collections/1333) to Work on the Wilson Cluster
 ---------------------------------
 
